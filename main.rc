@@ -1,10 +1,14 @@
 #[link(name = "rustyturtle", vers="0.1", author="cscott")];
 
+mod intern;
+
 mod op;
 mod function;
 mod literal;
-mod interp;
+mod object;
 mod startup;
+mod module;
+mod interp;
 
 fn main() {
 
