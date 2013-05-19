@@ -27,30 +27,59 @@ struct Interner {
 }
 impl Interner {
     pub fn new() -> ~Interner {
-        let mut i = ~Interner {
+        ~Interner {
             map: HashMap::new(),
             reverse_map: ~[]
-        };
-        i.intern(~"__proto__"); // ensure this is IString(0)
+        }
+    }
+
+    pub fn prefill(init : &[&str]) -> ~Interner {
+        let mut i = Interner::new();
+        for init.each() |v| { i.intern(*v); }
         i
     }
-    pub fn intern(&mut self, s : ~str) -> IString {
-        *do self.map.find_or_insert_with(s) |s| {
+
+    pub fn intern(&mut self, s : &str) -> IString {
+        // xxx note that we have to clone s to make a ~str from a &str
+        *do self.map.find_or_insert_with(s.to_str()) |s| {
             let is = IString { id: self.reverse_map.len() };
             self.reverse_map.push(s.clone());
             is
         }
     }
+    // convenience function
+    pub fn get(&self, is : IString) -> ~str { is.to_str(self) }
 }
 
-/*
-pub fn foo(a: IString, b: IString) -> bool { a==b }
-pub fn bar(a: uint, b: uint) -> bool { a==b }
-fn main() {
-    let mut a = Interner::new();
-    let b = a.intern(~"foo");
-    let c = a.intern(~"bar");
-    let d = foo(b, c);
-    debug!(d);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[should_fail]
+    fn i1() {
+        let i = Interner::new();
+        i.get(IString { id: 13 });
+    }
+    #[test]
+    fn i2 () {
+        let mut i = Interner::prefill(["__proto__"]);
+        // first one is one:
+        assert_eq!(i.intern (~"dog"), IString { id: 1 });
+        // re-use gets the same entry:
+        assert_eq!(i.intern (~"dog"), IString { id: 1 });
+        // different string gets a different #:
+        assert_eq!(i.intern (~"cat"), IString { id: 2 });
+        assert_eq!(i.intern (~"cat"), IString { id: 2 });
+        // dog is still at one
+        assert_eq!(i.intern (~"dog"), IString { id: 1 });
+        // new string gets 3
+        assert_eq!(i.intern (~"zebra" ), IString { id: 3 });
+        assert_eq!(i.get(IString { id: 1 }), ~"dog");
+        assert_eq!(i.get(IString { id: 2 }), ~"cat");
+        assert_eq!(i.get(IString { id: 3 }), ~"zebra");
+        // __proto__ is zero
+        assert_eq!(i.intern (~"__proto__"), IString::zero());
+        // IString comparison
+        assert_eq!(i.intern (~"rhino"), i.intern (~"rhino"));
+    }
 }
-*/
