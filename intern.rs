@@ -22,30 +22,32 @@ impl IString {
 }
 
 struct Interner {
-    priv map : HashMap<~str, IString>,
-    priv reverse_map : ~[~str]
+    priv map : @mut HashMap<~str, IString>,
+    priv reverse_map : @mut ~[~str]
 }
 impl Interner {
-    pub fn new() -> ~Interner {
-        ~Interner {
-            map: HashMap::new(),
-            reverse_map: ~[]
+    pub fn new() -> Interner {
+        Interner {
+            map: @mut HashMap::new(),
+            reverse_map: @mut ~[]
         }
     }
 
-    pub fn prefill(init : &[&str]) -> ~Interner {
-        let mut i = Interner::new();
+    pub fn prefill(init : &[&str]) -> Interner {
+        let i = Interner::new();
         for init.each() |v| { i.intern(*v); }
         i
     }
 
-    pub fn intern(&mut self, s : &str) -> IString {
+    pub fn intern(&self, s : &str) -> IString {
         // xxx note that we have to clone s to make a ~str from a &str
-        *do self.map.find_or_insert_with(s.to_str()) |s| {
+        //     since s may be inserted into the map
+        let rv = do self.map.find_or_insert_with(s.to_str()) |s| {
             let is = IString { id: self.reverse_map.len() };
             self.reverse_map.push(s.clone());
             is
-        }
+        };
+        *rv
     }
     // convenience function
     pub fn get(&self, is : IString) -> ~str { is.to_str(self) }
@@ -62,7 +64,7 @@ mod tests {
     }
     #[test]
     fn i2 () {
-        let mut i = Interner::prefill(["__proto__"]);
+        let i = Interner::prefill(["__proto__"]);
         // first one is one:
         assert_eq!(i.intern (~"dog"), IString { id: 1 });
         // re-use gets the same entry:
