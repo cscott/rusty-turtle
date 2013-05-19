@@ -14,3 +14,6 @@ test: intern-test op-test
 
 clean:
 	$(RM) main *-test
+
+# extra dependencies
+main: *.rs
