@@ -1,4 +1,4 @@
-use op::Op;
+use op::*;
 use function::Function;
 use literal::Literal;
 use module::Module;
@@ -7,16 +7,27 @@ use intern::intern;
 
 struct State {
     // main interpreter state.
-    parent: Option<State>, // calling context (another state)
-    frame: ~Object,
+    parent: Option<~State>, // calling context (another state)
+    frame: @mut Object,
     stack: ~[JsVal],
     pc: uint,
     // from bytecode file
-    module: Module,
-    func_id: uint,
-    // cached
-    bytecode: ~[uint],
-    literals: ~[Literal]
+    module: @Module,
+    function: @Function
+}
+
+impl State {
+    fn new(parent: Option<~State>, frame: @mut Object,
+           module: @Module, function: @Function) -> State {
+        State {
+            parent: parent,
+            frame: frame,
+            stack: ~[],
+            pc: 0u,
+            module: module,
+            function: function
+        }
+    }
 }
 
 struct Environment {
@@ -31,6 +42,7 @@ struct Environment {
     myFalse: @mut Object,
     myMath: @mut Object
 }
+
 impl Environment {
     pub fn new() -> ~Environment {
         let root_map = @mut ObjectMap::new();
@@ -81,6 +93,23 @@ impl Environment {
             myMath: myMath
         }
     }
+
+    fn add_native_func(&self, frame : @mut Object,
+                       obj : @mut Object, desc: FieldDesc,
+                       f : NativeFunction) -> @mut Object {
+        let my_func = Object::create(self.root_map, self.myFunction);
+        my_func.set(FieldDesc { name: intern("parent_frame"), hidden: true },
+                    JsObject(frame));
+        my_func.set(FieldDesc { name: intern("value"), hidden: true },
+                    JsNativeFunction(f));
+        /*
+        my_func.set(FieldDesc { name: intern("is_apply"), hidden: true },
+                    JsObject(if is_apply {self.myTrue} else {self.myFalse}));
+        */
+        obj.set(desc, JsObject(my_func));
+        my_func
+    }
+
     fn make_top_level_frame(&self, this : JsVal, arguments: &[JsVal]) -> @mut Object {
         let frame = Object::new(self.root_map); // "Object.create(null)"
 
@@ -118,11 +147,53 @@ impl Environment {
                   JsObject(self.myMath));
 
         // support for console.log
+        let myConsole = Object::create(self.root_map, self.myObject);
         frame.set(FieldDesc { name: intern("console"), hidden: false },
-                  JsObject(Object::create(self.root_map, self.myObject)));
+                  JsObject(myConsole));
 
-        // XXX hook up native functions
+        // native functions
+        do self.add_native_func(frame, myConsole,
+                                FieldDesc{ name: intern("log"), hidden: false })
+            |_this, args| {
+            let sargs = do vec::map_consume(args) |val| { val.to_str() };
+            io::println(str::connect(sargs, " "));
+            JsUndefined
+        };
 
         frame
+    }
+
+    pub fn interpret(&self, mut state: ~State) -> ~State {
+        let op = Op::new_from_uint(state.function.bytecode[state.pc]);
+        state.pc += 1;
+        let arg1;
+        match op.args() {
+            0 => { arg1 = 0; }
+            1 => { arg1 = state.function.bytecode[state.pc]; state.pc +=1; }
+            _ => fail!()
+        }
+        let mut ns = state;
+        match op {
+            Op_push_frame => {
+            },
+            Op_push_literal => {
+            },
+            Op_get_slot_direct => {
+            },
+            Op_get_slot_direct_check => {
+            },
+            Op_invoke => {
+            },
+            Op_return => {
+            },
+            Op_pop => {
+            },
+            Op_dup => {
+            },
+            Op_swap => {
+            },
+            _ => fail!() // unimplemented
+        }
+        ns
     }
 }

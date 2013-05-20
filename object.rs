@@ -147,6 +147,8 @@ impl Object {
     }
 }
 
+pub type NativeFunction = @fn(JsVal, ~[JsVal]) -> JsVal;
+
 pub enum JsVal {
     JsObject(@mut Object),
     JsNumber(f64),
@@ -154,7 +156,8 @@ pub enum JsVal {
     JsUndefined,
     JsNull,
     // not visible to user code
-    JsFunctionCode(@Function)
+    JsFunctionCode(@Function),
+    JsNativeFunction(NativeFunction)
 }
 impl JsVal {
     pub fn to_str(self) -> ~str {
@@ -164,7 +167,8 @@ impl JsVal {
             JsString(utf16) => str::from_utf16(utf16),
             JsUndefined => ~"undefined",
             JsNull => ~"null",
-            JsFunctionCode(_) => ~"[function]" // xxx use f.name
+            JsFunctionCode(_) => ~"[function]", // xxx use f.name
+            JsNativeFunction(_) => ~"[native function]"
         }
     }
     pub fn from_str(s: &str) -> JsVal {
