@@ -156,3 +156,70 @@ pub enum JsVal {
     // not visible to user code
     JsFunctionCode(@Function)
 }
+impl JsVal {
+    pub fn to_str(self) -> ~str {
+        match(self) {
+            JsObject(_) => ~"[object]",
+            JsNumber(n) => n.to_str(),
+            JsString(utf16) => str::from_utf16(utf16),
+            JsUndefined => ~"undefined",
+            JsNull => ~"null",
+            JsFunctionCode(_) => ~"[function]" // xxx use f.name
+        }
+    }
+    pub fn from_str(s: &str) -> JsVal {
+        JsString(at_vec::to_managed_consume(str::to_utf16(s)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use intern::intern;
+
+    #[test]
+    fn test_object_fields() {
+        let root_map = @mut ObjectMap::new();
+        let fdType = FieldDesc { name: intern("type"), hidden: true };
+
+        let myObject = Object::new(root_map); // parent of all objects.
+        myObject.set(fdType, JsVal::from_str("object"));
+
+        let myArray = Object::create(root_map, myObject);
+        myArray.set(fdType, JsVal::from_str("array"));
+        myArray.set(FieldDesc { name: intern("length"), hidden: false },
+                    JsNumber(0f64));
+
+        assert!( myObject.contains(fdType) );
+        assert!( myArray.contains(fdType) );
+        assert_eq!(myObject.get(fdType).to_str(), ~"object");
+        assert_eq!(myArray.get(fdType).to_str(), ~"array");
+        assert_eq!(myArray.get(FieldDesc { name: intern("length"),
+                                          hidden: false }).to_str(), ~"0");
+
+        // test prototypal inheritance
+        let fdFoo = FieldDesc { name: intern("foo"), hidden: false };
+
+        assert!( !myObject.contains(fdFoo) );
+        assert!( !myArray.contains(fdFoo) );
+        assert_eq!(myObject.get(fdFoo).to_str(), ~"undefined");
+        assert_eq!(myArray.get(fdFoo).to_str(), ~"undefined");
+
+        myObject.set(fdFoo, JsVal::from_str("bar"));
+
+        assert_eq!(myArray.get(fdFoo).to_str(), ~"bar");
+        assert_eq!(myObject.get(fdFoo).to_str(), ~"bar");
+        assert!( myObject.contains(fdFoo) );
+        assert!( myArray.contains(fdFoo) );
+
+        // test that hidden fields stay separate
+        let fdHiddenFoo = FieldDesc { name: intern("foo"), hidden: true };
+        assert!( !myArray.contains(fdHiddenFoo) );
+        assert_eq!(myArray.get(fdHiddenFoo).to_str(), ~"undefined");
+
+        myArray.set(fdHiddenFoo, JsNumber(42f64));
+        assert!( myArray.contains(fdHiddenFoo) );
+        assert_eq!(myArray.get(fdHiddenFoo).to_str(), ~"42");
+        assert_eq!(myArray.get(fdFoo).to_str(), ~"bar");
+    }
+}

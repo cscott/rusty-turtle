@@ -19,11 +19,6 @@ struct State {
     literals: ~[Literal]
 }
 
-// helper function
-fn mkJsString(s: &str) -> JsVal {
-    JsString(at_vec::to_managed_consume(str::to_utf16(s)))
-}
-
 struct Environment {
     root_map: @mut ObjectMap,
     myObject: @mut Object,
@@ -44,26 +39,26 @@ impl Environment {
 
         let myObject = Object::new(root_map); // parent of all objects.
         //myObject.get(fdType);
-        myObject.set(fdType, mkJsString("object"));
+        myObject.set(fdType, JsVal::from_str("object"));
 
         let myArray = Object::create(root_map, myObject);
-        myArray.set(fdType, mkJsString("array"));
+        myArray.set(fdType, JsVal::from_str("array"));
         myArray.set(FieldDesc { name: intern("length"), hidden: false },
                     JsNumber(0f64));
 
         let myFunction = Object::create(root_map, myObject);
-        myFunction.set(fdType, mkJsString("function"));
+        myFunction.set(fdType, JsVal::from_str("function"));
         myFunction.set(fdValue, JsUndefined); // allocate space
 
         let myString = Object::create(root_map, myObject);
-        myString.set(fdType, mkJsString("string"));
+        myString.set(fdType, JsVal::from_str("string"));
         //myString.set(fdValue, JsUndefined); // allocate space
 
         let myNumber = Object::create(root_map, myObject);
-        myNumber.set(fdType, mkJsString("number"));
+        myNumber.set(fdType, JsVal::from_str("number"));
 
         let myBoolean = Object::create(root_map, myObject);
-        myBoolean.set(fdType, mkJsString("boolean"));
+        myBoolean.set(fdType, JsVal::from_str("boolean"));
 
         let myTrue = Object::create(root_map, myBoolean);
         myTrue.set(fdValue, JsNumber(1f64));
