@@ -1,5 +1,5 @@
 use function::Function;
-use literal::*;
+use object::{JsVal,JsNumber,JsBool,JsUndefined,JsNull};
 
 use startup_init = startup::init;
 
@@ -31,13 +31,13 @@ impl Reader {
 // this represents a compilation unit (which can be as small as a function)
 pub struct Module {
     functions: ~[Function],
-    literals: ~[Literal]
+    literals: ~[JsVal]
 }
 
 impl Module {
     pub fn new_startup_module() -> Module {
         let mut functions : ~[Function] = ~[];
-        let mut literals : ~[Literal] = ~[];
+        let mut literals : ~[JsVal] = ~[];
         startup_init(&mut functions, &mut literals);
         Module { functions: functions, literals: literals }
     }
@@ -68,27 +68,27 @@ impl Module {
         }
         // parse literals
         let num_lits = reader.decode_uint();
-        let mut literals : ~[Literal] = vec::with_capacity(num_lits);
+        let mut literals : ~[JsVal] = vec::with_capacity(num_lits);
         while vec::len(literals) < num_lits {
             let l = match reader.decode_uint() {
                 0 => { // number tag
                     let num = reader.decode_str();
                     if "Infinity" == num { // xxx rust doesn't allow commutative
-                        Number(f64::infinity)
+                        JsNumber(f64::infinity)
                     } else if "-Infinity" == num {
-                        Number(f64::neg_infinity)
+                        JsNumber(f64::neg_infinity)
                     } else {
                         match f64::from_str(num) {
-                            Some(f) => Number(f),
+                            Some(f) => JsNumber(f),
                             _ => fail!()
                         }
                     }
                 },
-                1 => String(reader.decode_str()), // string tag
-                2 => Boolean(true), // boolean tags
-                3 => Boolean(false),
-                4 => Null,
-                5 => Undefined,
+                1 => JsVal::from_str(reader.decode_str()), // string tag
+                2 => JsBool(true), // boolean tags
+                3 => JsBool(false),
+                4 => JsNull,
+                5 => JsUndefined,
                 _ => fail!()
             };
             vec::push(&mut literals, l);

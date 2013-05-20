@@ -4,7 +4,6 @@ mod intern;
 
 mod op;
 mod function;
-mod literal;
 mod object;
 mod startup;
 mod module;

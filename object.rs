@@ -153,6 +153,7 @@ pub enum JsVal {
     JsObject(@mut Object),
     JsNumber(f64),
     JsString(@[u16]),
+    JsBool(bool),
     JsUndefined,
     JsNull,
     // not visible to user code
@@ -165,6 +166,7 @@ impl JsVal {
             JsObject(_) => ~"[object]",
             JsNumber(n) => n.to_str(),
             JsString(utf16) => str::from_utf16(utf16),
+            JsBool(b) => if b { ~"true" } else { ~"false" },
             JsUndefined => ~"undefined",
             JsNull => ~"null",
             JsFunctionCode(_) => ~"[function]", // xxx use f.name

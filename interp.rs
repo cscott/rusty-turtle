@@ -1,6 +1,5 @@
 use op::*;
 use function::Function;
-use literal::Literal;
 use module::Module;
 use object::*;
 use intern::intern;
