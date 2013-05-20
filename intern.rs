@@ -18,6 +18,11 @@ impl IString {
     fn to_str(self, interner : &Interner) -> ~str {
         interner.reverse_map[self.id].clone()
     }
+    fn to_uint(self, interner: &Interner) -> Option<uint> {
+        // XXX more efficient implementation possible in the future
+        let s = self.to_str(interner);
+        uint::from_str(s)
+    }
     // for reserved words
     pub fn zero() -> IString { IString { id: 0 } }
 }
@@ -50,6 +55,7 @@ impl Interner {
         };
         *rv
     }
+
     // convenience function
     pub fn get(&self, is : IString) -> ~str { is.to_str(self) }
 }
@@ -77,6 +83,10 @@ pub fn intern(s:&str) -> IString {
 
 pub fn intern_get(is:IString) -> ~str {
     is.to_str(get_task_local_interner())
+}
+
+pub fn intern_to_uint(is:IString) -> Option<uint> {
+    is.to_uint(get_task_local_interner())
 }
 
 #[cfg(test)]
@@ -132,5 +142,19 @@ mod tests {
         assert_eq!(intern (~"__proto__"), IString::zero());
         // IString comparison
         assert_eq!(intern (~"rhino"), intern (~"rhino"));
+    }
+    #[test]
+    fn i4() {
+        // "as uint" methods
+        let is1 = intern("dog");
+        assert_eq!(intern_to_uint(is1), None);
+        let is2 = intern("3");
+        assert_eq!(intern_to_uint(is2), Some(3u));
+        let is3 = intern("-4");
+        assert_eq!(intern_to_uint(is3), None);
+        let is4 = intern("010");
+        assert_eq!(intern_to_uint(is4), Some(10u));
+        let is5 = intern("a");
+        assert_eq!(intern_to_uint(is5), None);
     }
 }

@@ -10,5 +10,9 @@ mod module;
 mod interp;
 
 fn main() {
-
+    // create an environment and run the startup code
+    let env = interp::Environment::new();
+    let module = @module::Module::new_startup_module();
+    let result = env.interpret(module, 0);
+    io::println(fmt!("=> Result of evaluation is: %s", result.to_str()));
 }

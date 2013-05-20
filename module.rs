@@ -30,13 +30,13 @@ impl Reader {
 
 // this represents a compilation unit (which can be as small as a function)
 pub struct Module {
-    functions: ~[Function],
+    functions: ~[@Function],
     literals: ~[JsVal]
 }
 
 impl Module {
     pub fn new_startup_module() -> Module {
-        let mut functions : ~[Function] = ~[];
+        let mut functions : ~[@Function] = ~[];
         let mut literals : ~[JsVal] = ~[];
         startup_init(&mut functions, &mut literals);
         Module { functions: functions, literals: literals }
@@ -46,7 +46,7 @@ impl Module {
         let mut reader = Reader::new(buf);
         // parse functions
         let num_funcs = reader.decode_uint();
-        let mut functions : ~[Function] = vec::with_capacity(num_funcs);
+        let mut functions : ~[@Function] = vec::with_capacity(num_funcs);
         let mut func_id = 0;
         while func_id < num_funcs {
             let nargs = reader.decode_uint();
@@ -57,7 +57,7 @@ impl Module {
             while vec::len(bytecode) < blen {
                 vec::push(&mut bytecode, reader.decode_uint());
             }
-            vec::push(&mut functions, Function {
+            vec::push(&mut functions, @Function {
                 name: if str::is_empty(name) { None } else { Some(name) },
                 id: func_id,
                 nargs: nargs,
