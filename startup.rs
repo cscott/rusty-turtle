@@ -9,26 +9,79 @@ pub fn init(functions: &mut ~[@Function], literals: &mut ~[JsVal]) {
     name: None,
     id: 0,
     nargs: 0,
-    max_stack: 4,
+    max_stack: 3,
     bytecode: ~[
       0,	// push_frame
-      5, 0,	// get_slot_direct(0)
+      1, 0,	// push_literal(0)
+      8, 1,	// set_slot_direct(1)
+      0,	// push_frame
+      4, 1,	// new_function(1)
+      8, 1,	// set_slot_direct(1)
+      0,	// push_frame
+      5, 1,	// get_slot_direct(1)
+      0,	// push_frame
+      5, 8,	// get_slot_direct(8)
+      1, 9,	// push_literal(9)
+      10, 1,	// invoke(1)
+      11	// return
+    ]
+  });
+  vec::push(functions, @Function { // "fib"
+    name: Some(~"fib"),
+    id: 1,
+    nargs: 1,
+    max_stack: 5,
+    bytecode: ~[
+      0,	// push_frame
+      5, 2,	// get_slot_direct(2)
       15,	// dup
-      7, 1,	// get_slot_direct_check(1)
+      5, 3,	// get_slot_direct(3)
+      0,	// push_frame
       19,	// swap
-      1, 2,	// push_literal(2)
-      1, 3,	// push_literal(3)
-      10, 2,	// invoke(2)
+      8, 4,	// set_slot_direct(4)
       14,	// pop
-      1, 4,	// push_literal(4)
+      0,	// push_frame
+      5, 4,	// get_slot_direct(4)
+      1, 5,	// push_literal(5)
+      19,	// swap
+      24,	// bi_gt
+      13, 24,	// jmp_unless(24)
+      1, 6,	// push_literal(6)
+      12, 57,	// jmp(57)
+      0,	// push_frame
+      5, 7,	// get_slot_direct(7)
+      5, 1,	// get_slot_direct(1)
+      0,	// push_frame
+      5, 8,	// get_slot_direct(8)
+      0,	// push_frame
+      5, 4,	// get_slot_direct(4)
+      1, 6,	// push_literal(6)
+      27,	// bi_sub
+      10, 1,	// invoke(1)
+      0,	// push_frame
+      5, 7,	// get_slot_direct(7)
+      5, 1,	// get_slot_direct(1)
+      0,	// push_frame
+      5, 8,	// get_slot_direct(8)
+      0,	// push_frame
+      5, 4,	// get_slot_direct(4)
+      1, 5,	// push_literal(5)
+      27,	// bi_sub
+      10, 1,	// invoke(1)
+      26,	// bi_add
       11	// return
     ]
   });
 
   // literals
-  vec::push(literals, JsVal::from_str("console"));	// 0
-  vec::push(literals, JsVal::from_str("log"));	// 1
-  vec::push(literals, JsVal::from_str("Hello,"));	// 2
-  vec::push(literals, JsVal::from_str("world!"));	// 3
-  vec::push(literals, JsUndefined);	// 4
+  vec::push(literals, JsUndefined);	// 0
+  vec::push(literals, JsVal::from_str("fib"));	// 1
+  vec::push(literals, JsVal::from_str("arguments"));	// 2
+  vec::push(literals, JsNumber(0f64));	// 3
+  vec::push(literals, JsVal::from_str("n"));	// 4
+  vec::push(literals, JsNumber(2f64));	// 5
+  vec::push(literals, JsNumber(1f64));	// 6
+  vec::push(literals, JsVal::from_str("__proto__"));	// 7
+  vec::push(literals, JsVal::from_str("this"));	// 8
+  vec::push(literals, JsNumber(10f64));	// 9
 }

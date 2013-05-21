@@ -1,6 +1,7 @@
 // javascript object implementation
 use function::Function;
 use intern::IString;
+use module::Module;
 
 // this describes the fields in the object map.
 // we use some fields for internal implementation details (like the Function
@@ -147,6 +148,10 @@ impl Object {
     }
 }
 
+pub struct InterpretedFunction {
+    module: @Module,
+    function: @Function
+}
 pub type NativeFunction = @fn(JsVal, ~[JsVal]) -> JsVal;
 
 pub enum JsVal {
@@ -157,7 +162,7 @@ pub enum JsVal {
     JsUndefined,
     JsNull,
     // not visible to user code
-    JsFunctionCode(@Function),
+    JsFunctionCode(@InterpretedFunction),
     JsNativeFunction(NativeFunction)
 }
 impl JsVal {
@@ -171,6 +176,23 @@ impl JsVal {
             JsNull => ~"null",
             JsFunctionCode(_) => ~"[function]", // xxx use f.name
             JsNativeFunction(_) => ~"[native function]"
+        }
+    }
+    pub fn to_uint(self) -> Option<uint> {
+        match(self) {
+            JsNumber(n) => {
+                let nn = n as uint;
+                if (nn as f64) == n {
+                    Some(nn)
+                } else {
+                    None
+                }
+            },
+            JsString(utf16) => {
+                // XXX there are surely more efficient ways to do this
+                uint::from_str(str::from_utf16(utf16))
+            },
+            _ => None
         }
     }
     pub fn from_str(s: &str) -> JsVal {
