@@ -13,6 +13,11 @@ fn main() {
     // create an environment and run the startup code
     let env = interp::Environment::new();
     let module = @module::Module::new_startup_module();
-    let result = env.interpret(module, 0);
-    io::println(fmt!("=> Result of evaluation is: %s", result.to_str()));
+    let frame = env.make_top_level_frame(object::JsNull, ~[]);
+    let compile_from_source = env.interpret(module, 0, Some(frame));
+    // now run compile_from_source("{return 42;}")
+    let rv = env.interpret_function(frame, compile_from_source, object::JsNull,
+                                    ~[object::JsVal::from_str("{return 42;}")]);
+
+    io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
 }

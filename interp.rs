@@ -129,7 +129,7 @@ impl Environment {
     /* note that we make a copy of self when this function is called
        (pass by value) which allows us to access self from stack closures
        when we register native functions below. */
-    fn make_top_level_frame(self, this : JsVal, arguments: &[JsVal]) -> @mut Object {
+    pub fn make_top_level_frame(self, this : JsVal, arguments: &[JsVal]) -> @mut Object {
         let frame = Object::new(self.root_map); // "Object.create(null)"
 
         // set up 'this' and 'arguments'
@@ -505,17 +505,41 @@ impl Environment {
         state.stack.push(rv);
     }
 
-    pub fn interpret(&self, module: @Module, func_id: uint) -> JsVal {
-        let frame = self.make_top_level_frame(JsNull, ~[]);
+    // interpret a function object stored in a JsVal
+    pub fn interpret_function(&self, frame: @mut Object, function: JsVal,
+                              this: JsVal, args: &[JsVal]) -> JsVal {
+        // make a frame for the function invocation
+        let nframe = Object::create(self.root_map, frame);
+        nframe.set(FieldDesc {
+            name: intern("this"), hidden: false
+        }, this);
+        nframe.set(FieldDesc {
+            name: intern("arguments"), hidden: false
+        }, self.arrayCreate(args));
+        // lookup the module and function id from the function JsVal
+        match self.get_slot_fd(function, self.fdValue) {
+            JsFunctionCode(f) =>
+                self.interpret(f.module, f.function.id, Some(nframe)),
+            _ => fail!("not an interpreted function")
+        }
+    }
+
+    // interpret a function (typically the module initializer)
+    pub fn interpret(&self, module: @Module, func_id: uint, frame: Option<@mut Object>) -> JsVal {
+        let frame2 = match frame {
+            Some(f) => f,
+            None => self.make_top_level_frame(JsNull, ~[])
+        };
         let function = module.functions[func_id];
-        let top = ~State::new(None, frame, module, function);
-        let mut state = ~State::new(Some(top), frame, module, function);
+        let top = ~State::new(None, frame2, module, function);
+        let mut state = ~State::new(Some(top), frame2, module, function);
         while state.parent.is_some() /* wait for state == top */ {
             state = self.interpret_one(state);
         }
         state.stack.pop()
     }
 
+    // take one step in the interpreter (ie interpret one bytecode op)
     pub fn interpret_one(&self, mut state: ~State) -> ~State {
         //io::println(fmt!("pc %u stack %?", state.pc, state.stack.len()));
         let op = Op::new_from_uint(state.function.bytecode[state.pc]);
