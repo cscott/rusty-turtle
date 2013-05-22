@@ -45,7 +45,8 @@ struct Environment {
     fdType: FieldDesc,
     fdValue: FieldDesc,
     fdLength: FieldDesc,
-    fdParentFrame: FieldDesc
+    fdParentFrame: FieldDesc,
+    fdIsApply: FieldDesc
 }
 
 impl Environment {
@@ -56,6 +57,7 @@ impl Environment {
         let fdValue = FieldDesc { name: intern("value"), hidden: true };
         let fdLength = FieldDesc { name: intern("length"), hidden: false };
         let fdParentFrame = FieldDesc { name: intern("parent_frame"), hidden: true };
+        let fdIsApply = FieldDesc { name: intern("is_apply"), hidden: true };
 
         let myObject = Object::new(root_map); // parent of all objects.
         //myObject.get(fdType);
@@ -102,7 +104,8 @@ impl Environment {
             fdType: fdType,
             fdValue: fdValue,
             fdLength: fdLength,
-            fdParentFrame: fdParentFrame
+            fdParentFrame: fdParentFrame,
+            fdIsApply: fdIsApply
         }
     }
 
@@ -112,28 +115,28 @@ impl Environment {
         let my_func = Object::create(self.root_map, self.myFunction);
         my_func.set(self.fdParentFrame, JsObject(frame));
         my_func.set(self.fdValue, JsNativeFunction(f));
-        /*
-        my_func.set(FieldDesc { name: intern("is_apply"), hidden: true },
-                    JsObject(if is_apply {self.myTrue} else {self.myFalse}));
-        */
         obj.set(desc, JsObject(my_func));
         my_func
     }
 
-    fn make_top_level_frame(&self, this : JsVal, arguments: &[JsVal]) -> @mut Object {
+    fn add_native_func_str(&self, frame: @mut Object, obj: @mut Object,
+                           name: &str, f: NativeFunction) -> @mut Object {
+        self.add_native_func(frame, obj, FieldDesc {
+            name: intern(name), hidden: false
+        }, f)
+    }
+
+    /* note that we make a copy of self when this function is called
+       (pass by value) which allows us to access self from stack closures
+       when we register native functions below. */
+    fn make_top_level_frame(self, this : JsVal, arguments: &[JsVal]) -> @mut Object {
         let frame = Object::new(self.root_map); // "Object.create(null)"
 
         // set up 'this' and 'arguments'
         frame.set(FieldDesc { name: intern("this"), hidden: false }, this);
-        let myArgs = Object::create(self.root_map, self.myArray);
-        myArgs.set(self.fdLength, JsNumber(arguments.len() as f64));
-        for arguments.eachi |i, v| {
-            // xxx converting array indexes to string is a bit of fail.
-            myArgs.set(FieldDesc { name: intern(i.to_str()), hidden: false },
-                       *v);
-        }
+        let my_arguments = self.arrayCreate(arguments);
         frame.set(FieldDesc { name: intern("arguments"), hidden: false },
-                  JsObject(myArgs));
+                  my_arguments);
 
         // constructors
         let fdPrototype = FieldDesc { name:intern("prototype"), hidden:false };
@@ -143,9 +146,10 @@ impl Environment {
             cons.set(fdPrototype, JsObject(proto));
             frame.set(FieldDesc { name: intern(name), hidden: false },
                       JsObject(cons));
+            cons
         };
 
-        mkConstructor("Object", self.myObject);
+        let myObjectCons = mkConstructor("Object", self.myObject);
         mkConstructor("Array", self.myArray);
         mkConstructor("Function", self.myFunction);
         mkConstructor("Boolean", self.myBoolean);
@@ -160,14 +164,89 @@ impl Environment {
         frame.set(FieldDesc { name: intern("console"), hidden: false },
                   JsObject(myConsole));
 
+        // helper function
+        let getarg: @fn(&[JsVal], uint)->JsVal = |args, i| {
+            if args.len() > i { args[i] } else { JsUndefined }
+        };
+
         // native functions
-        do self.add_native_func(frame, myConsole,
-                                FieldDesc{ name: intern("log"), hidden: false })
-            |_this, args| {
+        do self.add_native_func_str(frame, myConsole, "log") |_this, args| {
             let sargs = do vec::map_consume(args) |val| { val.to_str() };
             io::println(str::connect(sargs, " "));
             JsUndefined
         };
+        do self.add_native_func_str(frame, self.myObject, "hasOwnProperty")
+            |this, args| {
+            let prop = FieldDesc {
+                name: intern(self.toString(getarg(args, 0))),
+                hidden: false
+            };
+            let rv = match(this) {
+                JsObject(obj) => obj.contains_simple(prop),
+                JsBool(b) =>
+                (if b { self.myTrue } else { self.myFalse })
+                .contains_simple(prop),
+                JsString(utf16) => {
+                    if self.fdLength==prop {
+                        true
+                    } else {
+                        match intern_to_uint(prop.name) {
+                            Some(n) if n < utf16.len() => true,
+                            _ => false
+                        }
+                    }
+                },
+                JsNumber(_) => false,
+                JsUndefined | JsNull => fail!("TypeError"), // XXX should throw
+                _ => fail!()
+            };
+            JsBool(rv)
+        };
+        do self.add_native_func_str(frame, myObjectCons, "create")
+            |_this, args| {
+            let rv = match getarg(args, 0) {
+                JsObject(obj) => Object::create(self.root_map, obj),
+                JsNull => Object::new(self.root_map),
+                _ => fail!("TypeError") // XXX should throw
+            };
+            JsObject(rv)
+        };
+
+        // XXX: We're not quite handling the "this" argument correctly.
+        // According to:
+        // https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/Function/call
+        // "If thisArg is null or undefined, this will be the global
+        // object. Otherwise, this will be equal to Object(thisArg)
+        // (which is thisArg if thisArg is already an object, or a
+        // String, Boolean, or Number if thisArg is a primitive value
+        // of the corresponding type)."
+        // this is disallowed in ES-5 strict mode; throws an exception instead
+        //  http://ejohn.org/blog/ecmascript-5-strict-mode-json-and-more/
+        do self.add_native_func_str(frame, self.myFunction, "call")
+            |this, args| {
+            // push arguments on stack and use 'invoke' bytecode op.
+            // arg #0 is the function itself ('this')
+            // arg #1 is 'this' (for the invoked function)
+            // arg #2-#n are rest of arguments
+            self.arrayCreate(~[this] +
+                             if args.len()>0 {args} else {~[JsUndefined]})
+        }.set(self.fdIsApply, JsBool(true));
+
+        do self.add_native_func_str(frame, self.myFunction, "apply")
+            |this, args| {
+            // push arguments on stack and use 'invoke' bytecode op.
+            // arg #0 is the function itself ('this')
+            // arg #1 is 'this' in the invoked function
+            // arg #2 is rest of arguments, as array
+            let mut nargs : ~[JsVal] = ~[ this ];
+            nargs.push( getarg(args, 0) );
+            if args.len() > 1 {
+                for self.arrayEach( args[1] ) |v| {
+                    nargs.push(v)
+                }
+            }
+            self.arrayCreate(nargs) // this is the natural order
+        }.set(self.fdIsApply, JsBool(true));
 
         frame
     }
@@ -311,6 +390,108 @@ impl Environment {
         }
     }
 
+    pub fn arrayCreate(&self, elements: &[JsVal]) -> JsVal {
+        let arr = Object::create(self.root_map, self.myArray);
+        arr.set(self.fdLength, JsNumber(elements.len() as f64));
+        for elements.eachi |i, v| {
+            // xxx converting array indexes to string is a bit of fail.
+            arr.set(FieldDesc { name: intern(i.to_str()), hidden: false },
+                    *v);
+        }
+        JsObject(arr)
+    }
+
+    pub fn arrayEach(&self, a: JsVal, f: &fn(JsVal) -> bool) -> bool {
+        match a {
+            JsObject(arr) => {
+                let mut i = 0u;
+                let mut len = arr.get(self.fdLength).to_uint()
+                    .expect("no length");
+                while i < len {
+                    let v = self.get_slot(a, JsNumber(i as f64));
+                    if !f(v) { return false; }
+                    i += 1;
+                    // this next is not strictly necessary for most cases,
+                    // but it makes the iterator more robust
+                    len = arr.get(self.fdLength).to_uint()
+                        .expect("length disappeared");
+                }
+                true
+            },
+            _ => fail!()
+        }
+    }
+
+    priv fn invoke(&self, mut state: ~State, arg1: uint) -> ~State {
+        // collect arguments
+        let mut native_args : ~[JsVal] = vec::with_capacity(arg1);
+        for uint::range(0, arg1) |_| {
+            native_args.push(state.stack.pop());
+        }
+        vec::reverse(native_args);
+        // collect 'this'
+        let my_this = state.stack.pop();
+        // get function object
+        let func = match state.stack.pop() {
+            JsObject(obj) => obj,
+            _ => {
+                // xxx throw wrapped TypeError
+                fail!(fmt!("Not a function at %u", state.pc));
+            }
+        };
+        // assert that func is a function
+        match func.get(self.fdType) {
+            JsString(utf16) if "function"==str::from_utf16(utf16) => {
+                /* okay! */
+            },
+            _ => {
+                // xxx throw wrapped TypeError
+                fail!(fmt!("Not a function at %u", state.pc));
+            }
+        };
+        match func.get(self.fdValue) {
+            JsNativeFunction(f) => {
+                // "native code"
+                // build proper native arguments array
+                let rv = f(my_this, native_args);
+                // handle "apply-like" natives
+                match func.get(self.fdIsApply) {
+                    JsBool(true) => {
+                        let mut nArgs = 0u;
+                        for self.arrayEach(rv) |v| {
+                            state.stack.push(v);
+                            nArgs += 1;
+                        }
+                        return self.invoke(state, nArgs-2);
+                    },
+                    _ => {
+                        state.stack.push(rv);
+                        return state;
+                    }
+                };
+            },
+            JsFunctionCode(f) => {
+                // create new frame
+                let parent_frame = match func.get(self.fdParentFrame) {
+                    JsObject(obj) => obj,
+                    _ => fail!()
+                };
+                let nframe = Object::create(self.root_map,
+                                            parent_frame);
+                nframe.set(FieldDesc {
+                    name: intern("this"), hidden: false
+                }, my_this);
+                nframe.set(FieldDesc {
+                    name: intern("arguments"), hidden: false
+                }, self.arrayCreate(native_args));
+                // construct new child state
+                return ~State::new(Some(state), nframe,
+                                   f.module, f.function);
+            },
+            _ => { fail!("bad function object"); }
+        };
+    }
+
     priv fn unary(&self, state: &mut State, uop: &fn(arg: JsVal) -> JsVal) {
         let arg = state.stack.pop();
         let rv = uop(arg);
@@ -420,75 +601,7 @@ impl Environment {
                 self.set_slot(obj, name, nval);
             },
             Op_invoke => {
-                // collect arguments
-                let myArgs = Object::create(self.root_map, self.myArray);
-                myArgs.set(self.fdLength, JsNumber(arg1 as f64));
-                let mut i = arg1;
-                while i > 0 {
-                    let name = intern((i-1).to_str());
-                    myArgs.set(FieldDesc { name:name, hidden:false },
-                               state.stack.pop());
-                    i -= 1;
-                }
-                // collect 'this'
-                let my_this = state.stack.pop();
-                // get function object
-                let func = match state.stack.pop() {
-                    JsObject(obj) => obj,
-                    _ => {
-                        // xxx throw wrapped TypeError
-                        fail!(fmt!("Not a function at %u", state.pc));
-                    }
-                };
-                // assert that func is a function
-                match func.get(self.fdType) {
-                    JsString(utf16) if "function"==str::from_utf16(utf16) => {
-                        /* okay! */
-                    },
-                    _ => {
-                        // xxx throw wrapped TypeError
-                        fail!(fmt!("Not a function at %u", state.pc));
-                    }
-                };
-                match func.get(self.fdValue) {
-                    JsNativeFunction(f) => {
-                        // "native code"
-                        // build proper native arguments array
-                        let mut native_args : ~[JsVal] =
-                            vec::with_capacity(arg1);
-                        i = 0;
-                        while i < arg1 {
-                            let desc = FieldDesc {
-                                name: intern(i.to_str()),
-                                hidden: false
-                            };
-                            native_args.push(myArgs.get(desc));
-                            i += 1;
-                        }
-                        // XXX handle "apply-like" natives
-                        let rv = f(my_this, native_args);
-                        state.stack.push(rv);
-                    },
-                    JsFunctionCode(f) => {
-                        // create new frame
-                        let parent_frame = match func.get(self.fdParentFrame) {
-                            JsObject(obj) => obj,
-                            _ => fail!()
-                        };
-                        let nframe = Object::create(self.root_map,
-                                                    parent_frame);
-                        nframe.set(FieldDesc {
-                            name: intern("this"), hidden: false
-                        }, my_this);
-                        nframe.set(FieldDesc {
-                            name: intern("arguments"), hidden: false
-                        }, JsObject(myArgs));
-                        // construct new child state
-                        state = ~State::new(Some(state), nframe,
-                                            f.module, f.function);
-                    },
-                    _ => { fail!("bad function object"); }
-                };
+                state = self.invoke(state, arg1);
             },
             Op_return => {
                 let retval = state.stack.pop();
@@ -507,12 +620,23 @@ impl Environment {
                 state.pc = arg1;
             },
             Op_jmp_unless => {
-                let condition = state.stack.pop();
-                match condition {
+                let cond = state.stack.pop();
+                // also has to convert to boolean; see Op_un_not
+                match cond {
                     JsBool(b) => {
                         if !b { state.pc = arg1; }
                     },
-                    _ => fail!("bad argument to jmp_unless")
+                    JsString(utf16) => {
+                        if utf16.is_empty() { state.pc = arg1; }
+                    },
+                    JsNumber(n) => {
+                        if n==0f64 { state.pc = arg1; }
+                    },
+                    JsObject(_) => { /* no op */ },
+                    JsUndefined | JsNull => {
+                        state.pc = arg1;
+                    },
+                    _ => fail!(fmt!("bad argument to jmp_unless: %?", cond))
                 };
             },
 
@@ -558,6 +682,10 @@ impl Environment {
             Op_un_not => do self.unary(state) |arg| {
                 match arg {
                     JsBool(b) => JsBool(!b),
+                    JsString(utf16) => JsBool(utf16.is_empty()),
+                    JsNumber(n) => JsBool(n==0f64),
+                    JsObject(_) => JsBool(false),
+                    JsUndefined | JsNull => JsBool(true),
                     _ => fail!(fmt!("unimplemented case for not: %?", arg))
                 }
             },
@@ -588,13 +716,14 @@ impl Environment {
             Op_bi_eq => do self.binary(state) |left, right| {
                 match (left, right) {
                     (JsNumber(l), JsNumber(r)) => JsBool(l == r),
-                    _ => fail!("unimplemented case for bi_eq")
+                    (JsString(l), JsString(r)) => JsBool(l == r),
+                    _ => fail!(fmt!("unimplemented case for bi_eq: %? %?", left, right))
                 }
             },
             Op_bi_gt => do self.binary(state) |left, right| {
                 match (left, right) {
                     (JsNumber(l), JsNumber(r)) => JsBool(l > r),
-                    _ => fail!("unimplemented case for bi_gt")
+                    _ => fail!(fmt!("unimplemented case for bi_gt: %? %?", left, right))
                 }
             },
             Op_bi_gte => do self.binary(state) |left, right| {
