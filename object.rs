@@ -161,6 +161,8 @@ pub enum JsVal {
     JsBool(bool),
     JsUndefined,
     JsNull,
+    // this appears on the stack only as a return value
+    JsThrown(@JsVal), // thrown exception by reference so we don't bloat type
     // not visible to user code
     JsFunctionCode(@InterpretedFunction),
     JsNativeFunction(NativeFunction)
@@ -174,6 +176,8 @@ impl JsVal {
             JsBool(b) => if b { ~"true" } else { ~"false" },
             JsUndefined => ~"undefined",
             JsNull => ~"null",
+            // special values
+            JsThrown(v) => fmt!("[thrown %s]", v.to_str()),
             JsFunctionCode(_) => ~"[function]", // xxx use f.name
             JsNativeFunction(_) => ~"[native function]"
         }

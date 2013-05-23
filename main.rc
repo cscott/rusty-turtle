@@ -10,7 +10,7 @@ mod module;
 mod interp;
 
 fn main() {
-    let source = ~"{ return 42; }";
+    let source = ~"{ var x = 42; return x; }";
     let i = interp::Interpreter::new();
     let rv = i.interpret(source);
     io::println(fmt!("Source: %s", source));
@@ -18,9 +18,11 @@ fn main() {
     // try out the repl.
     let lines : ~[~str] = ~[
         ~"1 + 2",
-        ~"let x = 4*10 + 2;",
+        ~"var x = 4*10 + 2;",
         ~"x",
-        ~"console.log('seems to work');"
+        ~"console.log('seems to work');",
+        ~"var fib = function(n) { return (n<2) ? 1 : fib(n-1) + fib(n-2); };",
+        ~"fib(10)"
     ];
     for lines.each() |s| {
         io::println(fmt!("> %s", *s));

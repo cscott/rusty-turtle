@@ -356,14 +356,29 @@ impl Environment {
             |_this, args| {
             let this = getarg(args, 0);
             let bodyBlock = getarg(args, 1);
-            let _catchBlock = getarg(args, 2);
-            let _finallyBlock = getarg(args, 3);
-            // XXX just invoke bodyBlock for now
-            self.interpret_function(bodyBlock, this, ~[])
+            let catchBlock = getarg(args, 2);
+            let finallyBlock = getarg(args, 3);
+            let mut rv = self.interpret_function(bodyBlock, this, ~[]);
+            match (rv, catchBlock) {
+                (JsThrown(v), JsObject(_)) => {
+                    // exception caught! invoke catchBlock!
+                    //io::println("exception caught!");
+                    self.interpret_function(catchBlock, this, ~[*v]);
+                    rv = JsUndefined;
+                },
+                _ => { /* no catch block; keep throwing */ }
+            };
+            match finallyBlock {
+                JsObject(_) => {
+                    fail!("finally unimplemented");
+                },
+                _ => { /* no finally block */ }
+            };
+            rv
         };
         do self.add_native_func_str(frame, myObjectCons, "Throw")
-            |_this, _args| {
-            fail!("Object.Throw unimplemented");
+            |_this, args| {
+            JsThrown(@getarg(args, 0))
         };
 
         frame
@@ -533,7 +548,7 @@ impl Environment {
                 // XXX should throw TypeError
                 fail!(fmt!("TypeError: Cannot set property %? of %?",name,obj));
             },
-            JsFunctionCode(_) | JsNativeFunction(_) => {
+            JsThrown(_) | JsFunctionCode(_) | JsNativeFunction(_) => {
                 fail!(fmt!("%? shouldn't escape!", obj));
             }
         }
@@ -571,6 +586,21 @@ impl Environment {
         }
     }
 
+    priv fn throw(&self, mut state: ~State, ex: @JsVal) -> ~State {
+        // JsVal should be instance of JsThrown
+        // XXX set private 'stack' field to the frame (assuming frame stores
+        // function names)
+        while state.parent.is_some() {
+            // use pattern matching to work around a limitation of the
+            // type system; ideally this should work:
+            //state = state.parent.expect("throw from top of stack");
+            let ~State { parent: parent, _ } = state;
+            state = parent.expect("throw from top of stack");
+        }
+        state.stack.push(JsThrown(ex));
+        state
+    }
+
     priv fn invoke(&self, mut state: ~State, arg1: uint) -> ~State {
         // collect arguments
         let mut native_args : ~[JsVal] = vec::with_capacity(arg1);
@@ -604,14 +634,17 @@ impl Environment {
                 // build proper native arguments array
                 let rv = f(my_this, native_args);
                 // handle "apply-like" natives
-                match func.get(self.fdIsApply) {
-                    JsBool(true) => {
+                match (func.get(self.fdIsApply), rv) {
+                    (JsBool(true), _) => {
                         let mut nArgs = 0u;
                         for self.arrayEach(rv) |v| {
                             state.stack.push(v);
                             nArgs += 1;
                         }
                         return self.invoke(state, nArgs-2);
+                    },
+                    (_, JsThrown(ex)) => {
+                        return self.throw(state, ex);
                     },
                     _ => {
                         state.stack.push(rv);
@@ -892,10 +925,12 @@ impl Environment {
                 let rv = match (left, right) {
                     (JsNumber(l), JsNumber(r)) => (l == r),
                     (JsString(l), JsString(r)) => (l == r),
+                    (JsNumber(_), JsString(_)) |
+                    (JsString(_), JsNumber(_)) => false,
                     (JsNull, JsNull) | (JsUndefined, JsUndefined) => true,
                     (JsNull, _) | (_, JsNull) => false,
                     (JsUndefined, _) | (_, JsUndefined) => false,
-                    _ => fail!(fmt!("unimplemented case for bi_eq: %s %s", left.to_str(), right.to_str()))
+                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_eq: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 };
                 JsBool(rv)
             },
@@ -904,7 +939,7 @@ impl Environment {
                     (JsString(l), JsString(r)) => (l > r),
                     (_, JsNumber(_)) |
                     (JsNumber(_), _) => (self.toNumber(left) > self.toNumber(right)),
-                    _ => fail!(fmt!("unimplemented case for bi_gt: %? %?", left, right))
+                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_gt: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 };
                 JsBool(rv)
             },
@@ -913,7 +948,7 @@ impl Environment {
                     (JsString(l), JsString(r)) => (l >= r),
                     (_, JsNumber(_)) |
                     (JsNumber(_), _) => (self.toNumber(left) >= self.toNumber(right)),
-                    _ => fail!(fmt!("unimplemented case for bi_gte: %? %?", left, right))
+                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_gte: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 };
                 JsBool(rv)
             },
@@ -922,13 +957,13 @@ impl Environment {
                     (JsNumber(l), JsNumber(r)) => JsNumber(l + r),
                     // XXX we really need a faster algorithm for string concat
                     (JsString(l), JsString(r)) => JsString(l + r),
-                    _ => fail!(fmt!("unimplemented case for bi_add: %? %?", left, right))
+                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_add: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 }
             },
             Op_bi_sub => do self.binary(state) |left, right| {
                 match (left, right) {
                     (JsNumber(l), JsNumber(r)) => JsNumber(l - r),
-                    _ => fail!(fmt!("unimplemented case for bi_sub: %? %?", left, right))
+                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_sub: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 }
             },
             Op_bi_mul => do self.binary(state) |left, right| {
@@ -977,6 +1012,7 @@ impl Interpreter {
             buf.push(self.env.toNumber(val) as u8);
         }
         let nm = @Module::new_from_bytes(buf);
+        //io::println(fmt!("module: %?", nm));
         // execute the new module.
         self.env.interpret(nm, 0, Some(self.frame))
     }
@@ -985,6 +1021,10 @@ impl Interpreter {
         let bc = self.env.interpret_function(
             self.repl, JsNull,
             ~[JsVal::from_str(source)]);
+        match bc {
+            JsThrown(_) => { return bc; }, // parser exception
+            _ => {}
+        };
         // create a new module from the bytecode
         let mut buf : ~[u8] = ~[];
         for self.env.arrayEach(bc) |val| {
