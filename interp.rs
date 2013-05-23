@@ -219,17 +219,28 @@ impl Environment {
         };
         do self.add_native_func_str(frame, frame, "parseInt") |_this, args| {
             let number = getarg(args, 0);
-            let mut radix = self.toNumber(getarg(args, 1)) as uint;
-            if radix==0u { radix = 10u; };
-            let rv = match (number, radix>0u) {
-                (JsString(utf16), true) => {
+            let radix = match getarg(args, 1) {
+                // falsy values become radix 10
+                JsBool(false) | JsString([]) | JsObject(_) |
+                JsUndefined | JsNull => 10u,
+                r => match self.toNumber(r) {
+                    n if !n.is_finite() => 10u,
+                    n if n<2f64 || n>=37f64 => 0, // aka bail
+                    n => n as uint
+                }
+            };
+            let rv = match number {
+                JsString(utf16) if radix!=0 => {
                     // XXX what about numbers larger than 2^32?
-                    match int::from_str_radix(str::from_utf16(utf16), radix) {
+                    // XXX parseInt(' 10z ', 16) = 16, so we seem to trim
+                    //     non-digit chars from the right.
+                    let s = str::from_utf16(utf16);
+                    match int::from_str_radix(s.trim(), radix) {
                         Some(n) => n as f64,
                         None => f64::NaN
                     }
                 },
-                (JsNumber(n), true) => {
+                JsNumber(n) if radix!=0 => {
                     // this is weird, but seems to match EcmaScript
                     match int::from_str_radix(n.to_str(), radix) {
                         Some(n) => n as f64,
@@ -247,7 +258,7 @@ impl Environment {
         do self.add_native_func_str(frame, self.myString, "charAt")
             |this, args| {
             let idx = match self.toNumber(getarg(args, 0)) {
-                f64::NaN => 0i, // strange
+                n if n.is_NaN() => 0i, // strange
                 n => n as int
             };
             match this {
@@ -266,7 +277,7 @@ impl Environment {
         do self.add_native_func_str(frame, self.myString, "charCodeAt")
             |this, args| {
             let idx = match self.toNumber(getarg(args, 0)) {
-                f64::NaN => 0i, // strange
+                n if n.is_NaN() => 0i, // strange
                 n => n as int
             };
             let rv = match this {
@@ -310,6 +321,7 @@ impl Environment {
             let s = match n {
                 f64::infinity => ~"Infinity",
                 f64::neg_infinity => ~"-Infinity",
+                _ if n.is_NaN() => ~"NaN",
                 _ => f64::to_str_radix(n, radix)
             };
             JsVal::from_str(s)
@@ -1033,5 +1045,123 @@ impl Interpreter {
         let nm = @Module::new_from_bytes(buf);
         // execute the new module.
         self.env.interpret(nm, 0, Some(self.frame))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interpret1() {
+        let source = ~"{ return 42; }";
+        let i = Interpreter::new();
+        let rv = i.interpret(source);
+        assert_eq!(rv.to_str(), ~"42")
+    }
+
+    #[test]
+    fn test_interpret2() {
+        let source = ~"{ var x = 42; return x; }";
+        let i = Interpreter::new();
+        let rv = i.interpret(source);
+        assert_eq!(rv.to_str(), ~"42")
+    }
+
+    fn script_test(script: &[(~str,~str)]) {
+        let i = Interpreter::new();
+        for script.each() |&(given, expected)| {
+            let rv = i.repl(given);
+            //io::println(fmt!("%s -> %s (expected %s)", given,
+            //                 rv.to_str(), expected));
+            assert_eq!(rv.to_str(), expected);
+        }
+    }
+
+    #[test]
+    fn test_repl1() {
+        script_test(~[
+            (~"1 + 2", ~"3"),
+            (~"var x = 4*10 + 2;", ~"undefined"),
+            (~"x", ~"42"),
+            (~"console.log('seems to work');", ~"undefined"),
+            (~"var fib = function(n) { return (n<2) ? 1 : fib(n-1) + fib(n-2); };", ~"undefined"),
+            (~"fib(10)", ~"89")
+        ]);
+    }
+
+    #[test]
+    fn test_parseInt() {
+        script_test(~[
+            // sanity check numeric types
+            (~"NaN", ~"NaN"),
+            (~"Infinity", ~"Infinity"),
+            (~"-Infinity", ~"-Infinity"),
+            // test parseInt
+            (~"parseInt('10', 16)", ~"16"),
+            (~"parseInt('10', '16')", ~"16"),
+            (~"parseInt('10', -10)", ~"NaN"),
+            (~"parseInt('10', -1)", ~"NaN"),
+            (~"parseInt('10', 'a')", ~"10"),
+            (~"parseInt('10', 'ab')", ~"10"),
+            (~"parseInt('10', NaN)", ~"10"),
+            (~"parseInt('10', 'NaN')", ~"10"),
+            (~"parseInt('10', Infinity)", ~"10"),
+            (~"parseInt('10', 'Infinity')", ~"10"),
+            (~"parseInt('10', -Infinity)", ~"10"),
+            (~"parseInt('10', '-Infinity')", ~"10"),
+            (~"parseInt('11')", ~"11"),
+            //(~"parseInt('11z')", ~"11"), // xxx currently fails
+            //(~"parseInt(' 11z')", ~"11"), // xxx currently fails
+            (~"parseInt('10', '16.5')", ~"16"),
+            (~"parseInt('10', 16.5)", ~"16"),
+        ]);
+    }
+
+    #[test]
+    fn test_cmp() {
+        script_test(~[
+            (~"'2' > '10'", ~"true"),
+            (~"2 > 10", ~"false"),
+            (~"2 > '10'", ~"false"),
+            (~"'2' > 10", ~"false"),
+            (~"'2' >= '10'", ~"true"),
+            (~"2 >= 10", ~"false"),
+            (~"2 >= '10'", ~"false"),
+            (~"'2' >= 10", ~"false"),
+            (~"'z' > 10", ~"false"),
+            (~"'z' < 10", ~"false")
+        ]);
+    }
+
+    #[test]
+    fn test_mul() {
+        script_test(~[
+            (~"' 10z' * 1", ~"NaN"),
+            (~"' 10 ' * 1", ~"10")
+        ]);
+    }
+
+    #[test]
+    fn test_Number_toString() {
+        script_test(~[
+            (~"Infinity.toString()", ~"Infinity"),
+            (~"Infinity.toString(16)", ~"Infinity"),
+            (~"NaN.toString(16)", ~"NaN")
+        ]);
+    }
+
+    #[test]
+    fn test_String_charAt() {
+        script_test(~[
+            (~"'abc'.charAt()", ~"a"),
+            (~"'abc'.charAt(-1)", ~""),
+            (~"'abc'.charAt(1)", ~"b"),
+            (~"'abc'.charAt(4)", ~""),
+            (~"'abc'.charAt(NaN)", ~"a"),
+            (~"'abc'.charAt('a')", ~"a"),
+            (~"'abc'.charAt(1.2)", ~"b"),
+            (~"'abc'.charAt(2.9)", ~"c"),
+        ]);
     }
 }

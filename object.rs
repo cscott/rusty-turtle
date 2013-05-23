@@ -171,6 +171,8 @@ impl JsVal {
     pub fn to_str(self) -> ~str {
         match(self) {
             JsObject(_) => ~"[object]",
+            JsNumber(n) if n==f64::infinity => ~"Infinity",
+            JsNumber(n) if n==f64::neg_infinity => ~"-Infinity",
             JsNumber(n) => n.to_str(),
             JsString(utf16) => str::from_utf16(utf16),
             JsBool(b) => if b { ~"true" } else { ~"false" },

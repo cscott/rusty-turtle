@@ -13583,7 +13583,7 @@ pub fn init(functions: &mut ~[@Function], literals: &mut ~[JsVal]) {
   vec::push(literals, JsVal::from_str("null"));	// 217
   vec::push(literals, JsVal::from_str("undefined"));	// 218
   vec::push(literals, JsVal::from_str("NaN"));	// 219
-  vec::push(literals, JsNumber(f64::infinity));	// 220
+  vec::push(literals, JsNumber(f64::NaN));	// 220
   vec::push(literals, JsVal::from_str("Infinity"));	// 221
   vec::push(literals, JsNumber(f64::infinity));	// 222
   vec::push(literals, JsVal::from_str("="));	// 223
