@@ -16,16 +16,19 @@ fn main() {
     let frame = env.make_top_level_frame(object::JsNull, ~[]);
     let compile_from_source = env.interpret(module, 0, Some(frame));
     // now run compile_from_source("{return 42;}")
-    let rv = env.interpret_function(compile_from_source, object::JsNull,
-                                    ~[object::JsVal::from_str("{return 42;}")]);
-
-    io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
-
+    let source = ~"{ return 42; }";
+    let bc = env.interpret_function(compile_from_source, object::JsNull,
+                                    ~[object::JsVal::from_str(source)]);
     // create a new module
     let mut buf : ~[u8] = ~[];
-    for env.arrayEach(rv) |val| {
+    for env.arrayEach(bc) |val| {
         buf.push(env.toNumber(val) as u8);
     }
-    let nm = module::Module::new_from_bytes(buf);
-    io::println(fmt!("=> New Module! %?", nm));
+    let nm = @module::Module::new_from_bytes(buf);
+    //io::println(fmt!("=> New Module! %?", nm));
+    // execute the new module.
+    let rv = env.interpret(nm, 0, Some(frame));
+    io::println(fmt!("Source: %s", source));
+    io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
+
 }
