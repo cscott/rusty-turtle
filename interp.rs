@@ -153,7 +153,7 @@ impl Environment {
         mkConstructor("Array", self.myArray);
         mkConstructor("Function", self.myFunction);
         mkConstructor("Boolean", self.myBoolean);
-        mkConstructor("String", self.myString);
+        let myStringCons = mkConstructor("String", self.myString);
         mkConstructor("Number", self.myNumber);
 
         frame.set(FieldDesc { name: intern("Math"), hidden: false },
@@ -211,6 +211,109 @@ impl Environment {
             };
             JsObject(rv)
         };
+        do self.add_native_func_str(frame, frame, "isNaN") |_this, args| {
+            JsBool(self.toNumber(getarg(args, 0)).is_NaN())
+        };
+        do self.add_native_func_str(frame, frame, "isFinite") |_this, args| {
+            JsBool(self.toNumber(getarg(args, 0)).is_finite())
+        };
+        do self.add_native_func_str(frame, frame, "parseInt") |_this, args| {
+            let number = getarg(args, 0);
+            let mut radix = self.toNumber(getarg(args, 1)) as uint;
+            if radix==0u { radix = 10u; };
+            let rv = match (number, radix>0u) {
+                (JsString(utf16), true) => {
+                    // XXX what about numbers larger than 2^32?
+                    match int::from_str_radix(str::from_utf16(utf16), radix) {
+                        Some(n) => n as f64,
+                        None => f64::NaN
+                    }
+                },
+                (JsNumber(n), true) => {
+                    // this is weird, but seems to match EcmaScript
+                    match int::from_str_radix(n.to_str(), radix) {
+                        Some(n) => n as f64,
+                        None => f64::NaN
+                    }
+                },
+                _ => f64::NaN
+            };
+            JsNumber(rv)
+        };
+        do self.add_native_func_str(frame, frame, "now")
+            |_this, _args| {
+            fail!("now() unimplemented");
+        };
+        do self.add_native_func_str(frame, self.myString, "charAt")
+            |this, args| {
+            let idx = match self.toNumber(getarg(args, 0)) {
+                f64::NaN => 0i, // strange
+                n => n as int
+            };
+            match this {
+                JsString(utf16) => {
+                    if 0 <= idx && idx < (utf16.len() as int) {
+                        JsString(@[utf16[idx]])
+                    } else {
+                        JsString(@[])
+                    }
+                },
+                // XXX probably should support String('abc'), which is an
+                // Object whose prototype is a String...
+                _ => fail!("charAt called on a non-string")
+            }
+        };
+        do self.add_native_func_str(frame, self.myString, "charCodeAt")
+            |this, args| {
+            let idx = match self.toNumber(getarg(args, 0)) {
+                f64::NaN => 0i, // strange
+                n => n as int
+            };
+            let rv = match this {
+                JsString(utf16) => {
+                    if 0 <= idx && idx < (utf16.len() as int) {
+                        utf16[idx] as f64
+                    } else {
+                        f64::NaN
+                    }
+                },
+                // XXX probably should support String('abc'), which is an
+                // Object whose prototype is a String...
+                _ => fail!("charCodeAt called on a non-string")
+            };
+            JsNumber(rv)
+        };
+        do self.add_native_func_str(frame, self.myString, "substring")
+            |_this, _args| {
+            fail!("String.subtring() unimplemented");
+        };
+        do self.add_native_func_str(frame, myStringCons, "fromCharCode")
+            |_this, _args| {
+            fail!("String.fromCharCode() unimplemented");
+        };
+        do self.add_native_func_str(frame, self.myMath, "floor")
+            |_this, _args| {
+            fail!("Math.floor() unimplemented");
+        };
+        do self.add_native_func_str(frame, self.myNumber, "toString")
+            |this, args| {
+            let n = match this {
+                JsNumber(n) => n,
+                _ => fail!("TypeError: Number.prototype.toString is not generic")
+            };
+            let radix = match getarg(args, 0) {
+                JsUndefined => 10u,
+                JsNumber(n) if n >= 2f64 && n <= 36f64 => n as uint,
+                // XXX should throw
+                _ => fail!("RangeError: toString() radix argument must be between 2 and 36")
+            };
+            let s = match n {
+                f64::infinity => ~"Infinity",
+                f64::neg_infinity => ~"-Infinity",
+                _ => f64::to_str_radix(n, radix)
+            };
+            JsVal::from_str(s)
+        };
 
         // XXX: We're not quite handling the "this" argument correctly.
         // According to:
@@ -254,6 +357,37 @@ impl Environment {
     pub fn toString(&self, val: JsVal) -> ~str {
         // xxx invoke toString?
         val.to_str()
+    }
+    pub fn toNumber(&self, val: JsVal) -> f64 {
+        // this is the conversion done by (eg) bi_mul
+        match val {
+            JsObject(obj) => { // arrays are weird, other objects = true
+                match obj.get(self.fdType).to_str() {
+                    ~"array" => fail!("unimplemented array->number conversion"),
+                    _ => f64::NaN
+                }
+            },
+            JsString(utf16) => {
+                let s = str::from_utf16(utf16);
+                // XXX shouldn't have to break up this expression (rust bug)
+                match s.trim() {
+                    // these are rust constants, not javascript
+                    "inf" | "+inf" | "-inf" => f64::NaN,
+                    // these are the javascript names (which rust doesn't accept)
+                    "Infinity" | "+Infinity" => f64::infinity,
+                    "-Infinity" => f64::neg_infinity,
+                    s => match f64::from_str(s) {
+                        Some(n) => n,
+                        None => f64::NaN
+                    }
+                }
+            },
+            JsNumber(n) => n,
+            JsUndefined => f64::NaN,
+            JsBool(false) | JsNull => 0f64,
+            JsBool(true) => 1f64,
+            _ => fail!(fmt!("can't convert %? to number", val))
+        }
     }
     pub fn get_slot(&self, obj: JsVal, name: JsVal) -> JsVal {
         let desc = FieldDesc {
@@ -543,7 +677,7 @@ impl Environment {
 
     // take one step in the interpreter (ie interpret one bytecode op)
     pub fn interpret_one(&self, mut state: ~State) -> ~State {
-        //io::println(fmt!("pc %u stack %?", state.pc, state.stack.len()));
+        //io::println(fmt!("fid %u pc %u stack %?", state.function.id, state.pc, state.stack.len()));
         let op = Op::new_from_uint(state.function.bytecode[state.pc]);
         state.pc += 1;
         let arg1;
@@ -740,23 +874,33 @@ impl Environment {
 
             // binary operators
             Op_bi_eq => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsBool(l == r),
-                    (JsString(l), JsString(r)) => JsBool(l == r),
-                    _ => fail!(fmt!("unimplemented case for bi_eq: %? %?", left, right))
-                }
+                let rv = match (left, right) {
+                    (JsNumber(l), JsNumber(r)) => (l == r),
+                    (JsString(l), JsString(r)) => (l == r),
+                    (JsNull, JsNull) | (JsUndefined, JsUndefined) => true,
+                    (JsNull, _) | (_, JsNull) => false,
+                    (JsUndefined, _) | (_, JsUndefined) => false,
+                    _ => fail!(fmt!("unimplemented case for bi_eq: %s %s", left.to_str(), right.to_str()))
+                };
+                JsBool(rv)
             },
             Op_bi_gt => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsBool(l > r),
+                let rv = match (left, right) {
+                    (JsString(l), JsString(r)) => (l > r),
+                    (_, JsNumber(_)) |
+                    (JsNumber(_), _) => (self.toNumber(left) > self.toNumber(right)),
                     _ => fail!(fmt!("unimplemented case for bi_gt: %? %?", left, right))
-                }
+                };
+                JsBool(rv)
             },
             Op_bi_gte => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsBool(l >= r),
+                let rv = match (left, right) {
+                    (JsString(l), JsString(r)) => (l >= r),
+                    (_, JsNumber(_)) |
+                    (JsNumber(_), _) => (self.toNumber(left) >= self.toNumber(right)),
                     _ => fail!(fmt!("unimplemented case for bi_gte: %? %?", left, right))
-                }
+                };
+                JsBool(rv)
             },
             Op_bi_add => do self.binary(state) |left, right| {
                 match (left, right) {
@@ -773,16 +917,10 @@ impl Environment {
                 }
             },
             Op_bi_mul => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsNumber(l * r),
-                    _ => fail!(fmt!("unimplemented case for bi_mul: %? %?", left, right))
-                }
+                JsNumber(self.toNumber(left) * self.toNumber(right))
             },
             Op_bi_div => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsNumber(l / r),
-                    _ => fail!(fmt!("unimplemented case for bi_div: %? %?", left, right))
-                }
+                JsNumber(self.toNumber(left) / self.toNumber(right))
             }
         }
         state

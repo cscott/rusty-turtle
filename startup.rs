@@ -13186,7 +13186,7 @@ pub fn init(functions: &mut ~[@Function], literals: &mut ~[JsVal]) {
   vec::push(functions, @Function {
     name: None,
     id: 143,
-    nargs: 1,
+    nargs: 2,
     max_stack: 6,
     bytecode: ~[
       0,	// 0: push_frame
@@ -13196,57 +13196,72 @@ pub fn init(functions: &mut ~[@Function], literals: &mut ~[JsVal]) {
       0,	// 6: push_frame
       19,	// 7: swap
       8, 260,	// 8: set_slot_direct(260)
-      14,	// 10: pop
-      0,	// 11: push_frame
-      1, 0,	// 12: push_literal(0)
-      8, 39,	// 14: set_slot_direct(39)
-      0,	// 16: push_frame
-      1, 0,	// 17: push_literal(0)
-      8, 271,	// 19: set_slot_direct(271)
-      0,	// 21: push_frame
-      1, 0,	// 22: push_literal(0)
-      8, 280,	// 24: set_slot_direct(280)
-      0,	// 26: push_frame
-      0,	// 27: push_frame
-      5, 260,	// 28: get_slot_direct(260)
-      15,	// 30: dup
-      20,	// 31: un_not
-      13, 37,	// 32: jmp_unless(37)
-      14,	// 34: pop
-      1, 397,	// 35: push_literal(397)
-      8, 260,	// 37: set_slot_direct(260)
-      0,	// 39: push_frame
-      0,	// 40: push_frame
-      5, 18,	// 41: get_slot_direct(18)
-      5, 140,	// 43: get_slot_direct(140)
-      0,	// 45: push_frame
-      5, 14,	// 46: get_slot_direct(14)
-      0,	// 48: push_frame
-      5, 260,	// 49: get_slot_direct(260)
-      1, 398,	// 51: push_literal(398)
-      1, 399,	// 53: push_literal(399)
-      26,	// 55: bi_add
-      1, 400,	// 56: push_literal(400)
-      26,	// 58: bi_add
-      10, 2,	// 59: invoke(2)
-      8, 271,	// 61: set_slot_direct(271)
-      0,	// 63: push_frame
-      0,	// 64: push_frame
-      5, 18,	// 65: get_slot_direct(18)
-      5, 329,	// 67: get_slot_direct(329)
-      0,	// 69: push_frame
-      5, 14,	// 70: get_slot_direct(14)
-      0,	// 72: push_frame
-      5, 271,	// 73: get_slot_direct(271)
-      10, 1,	// 75: invoke(1)
-      8, 280,	// 77: set_slot_direct(280)
+      15,	// 10: dup
+      5, 5,	// 11: get_slot_direct(5)
+      0,	// 13: push_frame
+      19,	// 14: swap
+      8, 397,	// 15: set_slot_direct(397)
+      14,	// 17: pop
+      0,	// 18: push_frame
+      1, 0,	// 19: push_literal(0)
+      8, 39,	// 21: set_slot_direct(39)
+      0,	// 23: push_frame
+      1, 0,	// 24: push_literal(0)
+      8, 271,	// 26: set_slot_direct(271)
+      0,	// 28: push_frame
+      1, 0,	// 29: push_literal(0)
+      8, 280,	// 31: set_slot_direct(280)
+      0,	// 33: push_frame
+      0,	// 34: push_frame
+      5, 260,	// 35: get_slot_direct(260)
+      15,	// 37: dup
+      20,	// 38: un_not
+      13, 44,	// 39: jmp_unless(44)
+      14,	// 41: pop
+      1, 398,	// 42: push_literal(398)
+      8, 260,	// 44: set_slot_direct(260)
+      0,	// 46: push_frame
+      0,	// 47: push_frame
+      5, 18,	// 48: get_slot_direct(18)
+      5, 140,	// 50: get_slot_direct(140)
+      0,	// 52: push_frame
+      5, 14,	// 53: get_slot_direct(14)
+      0,	// 55: push_frame
+      5, 260,	// 56: get_slot_direct(260)
+      1, 399,	// 58: push_literal(399)
+      1, 400,	// 60: push_literal(400)
+      26,	// 62: bi_add
+      1, 401,	// 63: push_literal(401)
+      26,	// 65: bi_add
+      10, 2,	// 66: invoke(2)
+      8, 271,	// 68: set_slot_direct(271)
+      0,	// 70: push_frame
+      0,	// 71: push_frame
+      5, 18,	// 72: get_slot_direct(18)
+      5, 329,	// 74: get_slot_direct(329)
+      0,	// 76: push_frame
+      5, 14,	// 77: get_slot_direct(14)
       0,	// 79: push_frame
-      0,	// 80: push_frame
-      5, 280,	// 81: get_slot_direct(280)
-      8, 39,	// 83: set_slot_direct(39)
-      0,	// 85: push_frame
-      5, 39,	// 86: get_slot_direct(39)
-      11	// 88: return
+      5, 271,	// 80: get_slot_direct(271)
+      10, 1,	// 82: invoke(1)
+      8, 280,	// 84: set_slot_direct(280)
+      0,	// 86: push_frame
+      0,	// 87: push_frame
+      5, 397,	// 88: get_slot_direct(397)
+      13, 97,	// 90: jmp_unless(97)
+      0,	// 92: push_frame
+      5, 280,	// 93: get_slot_direct(280)
+      12, 106,	// 95: jmp(106)
+      0,	// 97: push_frame
+      5, 280,	// 98: get_slot_direct(280)
+      15,	// 100: dup
+      7, 368,	// 101: get_slot_direct_check(368)
+      19,	// 103: swap
+      10, 0,	// 104: invoke(0)
+      8, 39,	// 106: set_slot_direct(39)
+      0,	// 108: push_frame
+      5, 39,	// 109: get_slot_direct(39)
+      11	// 111: return
     ]
   });
 
@@ -13648,8 +13663,9 @@ pub fn init(functions: &mut ~[@Function], literals: &mut ~[JsVal]) {
   vec::push(literals, JsVal::from_str("parse_tree"));	// 394
   vec::push(literals, JsVal::from_str("make_bcompile"));	// 395
   vec::push(literals, JsVal::from_str("compile_from_source"));	// 396
-  vec::push(literals, JsVal::from_str("{ return 1+2; }"));	// 397
-  vec::push(literals, JsVal::from_str("isFinite parseInt isNaN "));	// 398
-  vec::push(literals, JsVal::from_str("Boolean String Function Math "));	// 399
-  vec::push(literals, JsVal::from_str("console arguments now define document"));	// 400
+  vec::push(literals, JsVal::from_str("as_object"));	// 397
+  vec::push(literals, JsVal::from_str("{ return 1+2; }"));	// 398
+  vec::push(literals, JsVal::from_str("isFinite parseInt isNaN "));	// 399
+  vec::push(literals, JsVal::from_str("Boolean String Function Math "));	// 400
+  vec::push(literals, JsVal::from_str("console arguments now define document"));	// 401
 }

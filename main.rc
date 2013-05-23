@@ -20,4 +20,12 @@ fn main() {
                                     ~[object::JsVal::from_str("{return 42;}")]);
 
     io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
+
+    // create a new module
+    let mut buf : ~[u8] = ~[];
+    for env.arrayEach(rv) |val| {
+        buf.push(env.toNumber(val) as u8);
+    }
+    let nm = module::Module::new_from_bytes(buf);
+    io::println(fmt!("=> New Module! %?", nm));
 }
