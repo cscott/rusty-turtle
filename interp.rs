@@ -351,6 +351,21 @@ impl Environment {
             self.arrayCreate(nargs) // this is the natural order
         }.set(self.fdIsApply, JsBool(true));
 
+        // Object.Try/Object.Throw -- turtlescript extension!
+        do self.add_native_func_str(frame, myObjectCons, "Try")
+            |_this, args| {
+            let this = getarg(args, 0);
+            let bodyBlock = getarg(args, 1);
+            let _catchBlock = getarg(args, 2);
+            let _finallyBlock = getarg(args, 3);
+            // XXX just invoke bodyBlock for now
+            self.interpret_function(bodyBlock, this, ~[])
+        };
+        do self.add_native_func_str(frame, myObjectCons, "Throw")
+            |_this, _args| {
+            fail!("Object.Throw unimplemented");
+        };
+
         frame
     }
 
@@ -930,7 +945,8 @@ impl Environment {
 struct Interpreter {
     pub env: ~Environment,
     priv frame: @mut Object,
-    priv compile_from_source: JsVal
+    priv compile_from_source: JsVal,
+    priv repl: JsVal
 }
 impl Interpreter {
     pub fn new() -> Interpreter {
@@ -939,16 +955,35 @@ impl Interpreter {
         let module = @Module::new_startup_module();
         let frame = env.make_top_level_frame(JsNull, ~[]);
         let compile_from_source = env.interpret(module, 0, Some(frame));
+        // create repl
+        let make_repl = env.get_slot(compile_from_source,
+                                     JsVal::from_str(~"make_repl"));
+        let repl = env.interpret_function(make_repl, JsNull, ~[]);
         Interpreter {
             env: env,
             frame: frame,
-            compile_from_source: compile_from_source
+            compile_from_source: compile_from_source,
+            repl: repl
         }
     }
     pub fn interpret(&self, source: &str) -> JsVal {
         // compile source to bytecode
         let bc = self.env.interpret_function(
             self.compile_from_source, JsNull,
+            ~[JsVal::from_str(source)]);
+        // create a new module from the bytecode
+        let mut buf : ~[u8] = ~[];
+        for self.env.arrayEach(bc) |val| {
+            buf.push(self.env.toNumber(val) as u8);
+        }
+        let nm = @Module::new_from_bytes(buf);
+        // execute the new module.
+        self.env.interpret(nm, 0, Some(self.frame))
+    }
+    pub fn repl(&self, source: &str) -> JsVal {
+        // compile source to bytecode
+        let bc = self.env.interpret_function(
+            self.repl, JsNull,
             ~[JsVal::from_str(source)]);
         // create a new module from the bytecode
         let mut buf : ~[u8] = ~[];

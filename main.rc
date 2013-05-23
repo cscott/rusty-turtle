@@ -15,4 +15,16 @@ fn main() {
     let rv = i.interpret(source);
     io::println(fmt!("Source: %s", source));
     io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
+    // try out the repl.
+    let lines : ~[~str] = ~[
+        ~"1 + 2",
+        ~"let x = 4*10 + 2;",
+        ~"x",
+        ~"console.log('seems to work');"
+    ];
+    for lines.each() |s| {
+        io::println(fmt!("> %s", *s));
+        let rv = i.repl(*s);
+        io::println(rv.to_str());
+    }
 }
