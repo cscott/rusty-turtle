@@ -926,3 +926,37 @@ impl Environment {
         state
     }
 }
+
+struct Interpreter {
+    pub env: ~Environment,
+    priv frame: @mut Object,
+    priv compile_from_source: JsVal
+}
+impl Interpreter {
+    pub fn new() -> Interpreter {
+        // create an environment and run the startup code
+        let env = Environment::new();
+        let module = @Module::new_startup_module();
+        let frame = env.make_top_level_frame(JsNull, ~[]);
+        let compile_from_source = env.interpret(module, 0, Some(frame));
+        Interpreter {
+            env: env,
+            frame: frame,
+            compile_from_source: compile_from_source
+        }
+    }
+    pub fn interpret(&self, source: &str) -> JsVal {
+        // compile source to bytecode
+        let bc = self.env.interpret_function(
+            self.compile_from_source, JsNull,
+            ~[JsVal::from_str(source)]);
+        // create a new module from the bytecode
+        let mut buf : ~[u8] = ~[];
+        for self.env.arrayEach(bc) |val| {
+            buf.push(self.env.toNumber(val) as u8);
+        }
+        let nm = @Module::new_from_bytes(buf);
+        // execute the new module.
+        self.env.interpret(nm, 0, Some(self.frame))
+    }
+}
