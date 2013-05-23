@@ -434,9 +434,9 @@ impl Environment {
         // get function object
         let func = match state.stack.pop() {
             JsObject(obj) => obj,
-            _ => {
+            _f => {
                 // xxx throw wrapped TypeError
-                fail!(fmt!("Not a function at %u", state.pc));
+                fail!(fmt!("Not a function at %u function %u: %?", state.pc, state.function.id, _f));
             }
         };
         // assert that func is a function
@@ -506,20 +506,22 @@ impl Environment {
     }
 
     // interpret a function object stored in a JsVal
-    pub fn interpret_function(&self, frame: @mut Object, function: JsVal,
+    pub fn interpret_function(&self, function: JsVal,
                               this: JsVal, args: &[JsVal]) -> JsVal {
-        // make a frame for the function invocation
-        let nframe = Object::create(self.root_map, frame);
-        nframe.set(FieldDesc {
-            name: intern("this"), hidden: false
-        }, this);
-        nframe.set(FieldDesc {
-            name: intern("arguments"), hidden: false
-        }, self.arrayCreate(args));
         // lookup the module and function id from the function JsVal
-        match self.get_slot_fd(function, self.fdValue) {
-            JsFunctionCode(f) =>
-                self.interpret(f.module, f.function.id, Some(nframe)),
+        match (self.get_slot_fd(function, self.fdValue),
+               self.get_slot_fd(function, self.fdParentFrame)) {
+            (JsFunctionCode(f), JsObject(parent_frame)) => {
+                // make a frame for the function invocation
+                let nframe = Object::create(self.root_map, parent_frame);
+                nframe.set(FieldDesc {
+                    name: intern("this"), hidden: false
+                }, this);
+                nframe.set(FieldDesc {
+                    name: intern("arguments"), hidden: false
+                }, self.arrayCreate(args));
+                self.interpret(f.module, f.function.id, Some(nframe))
+            },
             _ => fail!("not an interpreted function")
         }
     }
@@ -759,6 +761,8 @@ impl Environment {
             Op_bi_add => do self.binary(state) |left, right| {
                 match (left, right) {
                     (JsNumber(l), JsNumber(r)) => JsNumber(l + r),
+                    // XXX we really need a faster algorithm for string concat
+                    (JsString(l), JsString(r)) => JsString(l + r),
                     _ => fail!(fmt!("unimplemented case for bi_add: %? %?", left, right))
                 }
             },
