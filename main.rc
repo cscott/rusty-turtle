@@ -1,7 +1,7 @@
 #[link(name = "rustyturtle", vers="0.1", author="cscott")];
+extern mod std;
 
 mod intern;
-
 mod op;
 mod function;
 mod object;
@@ -10,23 +10,36 @@ mod module;
 mod interp;
 
 fn main() {
-    let source = ~"{ var x = 42; return x; }";
+    use std::rl;
+
     let i = interp::Interpreter::new();
-    let rv = i.interpret(source);
-    io::println(fmt!("Source: %s", source));
-    io::println(fmt!("=> Result of evaluation is: %s", rv.to_str()));
-    // try out the repl.
-    let lines : ~[~str] = ~[
-        ~"1 + 2",
-        ~"var x = 4*10 + 2;",
-        ~"x",
-        ~"console.log('seems to work');",
-        ~"var fib = function(n) { return (n<2) ? 1 : fib(n-1) + fib(n-2); };",
-        ~"fib(10)"
-    ];
-    for lines.each() |s| {
-        io::println(fmt!("> %s", *s));
-        let rv = i.repl(*s);
-        io::println(rv.to_str());
+
+    let args = os::args();
+    if args.len() <= 1 {
+        // repl!
+        loop {
+            let line = unsafe { rl::read("> ") };
+            match line {
+                None => break,
+                Some(s) => {
+                    unsafe { rl::add_history(s) };
+                    let rv = i.repl(s);
+                    io::println(rv.to_str());
+                }
+            }
+        }
+    } else {
+        // whole file.
+        // XXX implement line-at-a-time mode where we echo after each
+        //     line of input (doctest style?)
+        match io::file_reader(&path::PosixPath(args[1])) {
+            Err(msg) => fail!(fmt!("Could not read %s: %s", args[1], msg)),
+            Ok(reader) => {
+                let bytes = reader.read_whole_stream();
+                let source = str::from_bytes(bytes);
+                let rv = i.interpret(source);
+                io::println(fmt!("=> %s", rv.to_str()));
+            }
+        }
     }
 }
