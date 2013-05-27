@@ -1,4 +1,5 @@
 RUSTC=./rustc
+export RUST_THREADS=1
 
 all: main
 
