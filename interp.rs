@@ -46,7 +46,8 @@ struct Environment {
     fdValue: FieldDesc,
     fdLength: FieldDesc,
     fdParentFrame: FieldDesc,
-    fdIsApply: FieldDesc
+    fdIsApply: FieldDesc,
+    fdDefaultValue: FieldDesc
 }
 
 impl Environment {
@@ -58,6 +59,7 @@ impl Environment {
         let fdLength = FieldDesc { name: intern("length"), hidden: false };
         let fdParentFrame = FieldDesc { name: intern("parent_frame"), hidden: true };
         let fdIsApply = FieldDesc { name: intern("is_apply"), hidden: true };
+        let fdDefaultValue = FieldDesc { name: intern("DefaultValue"), hidden: true };
 
         let myObject = Object::new(root_map); // parent of all objects.
         //myObject.get(fdType);
@@ -105,7 +107,8 @@ impl Environment {
             fdValue: fdValue,
             fdLength: fdLength,
             fdParentFrame: fdParentFrame,
-            fdIsApply: fdIsApply
+            fdIsApply: fdIsApply,
+            fdDefaultValue: fdDefaultValue
         }
     }
 
@@ -152,28 +155,96 @@ impl Environment {
         let myObjectCons = mkConstructor("Object", self.myObject);
         mkConstructor("Array", self.myArray);
         mkConstructor("Function", self.myFunction);
-        mkConstructor("Boolean", self.myBoolean);
+        let myBooleanCons = mkConstructor("Boolean", self.myBoolean);
         let myStringCons = mkConstructor("String", self.myString);
         mkConstructor("Number", self.myNumber);
 
         frame.set(FieldDesc { name: intern("Math"), hidden: false },
                   JsObject(self.myMath));
 
-        // support for console.log
-        let myConsole = Object::create(self.root_map, self.myObject);
-        frame.set(FieldDesc { name: intern("console"), hidden: false },
-                  JsObject(myConsole));
-
         // helper function
         let getarg: @fn(&[JsVal], uint)->JsVal = |args, i| {
             if args.len() > i { args[i] } else { JsUndefined }
         };
+
+        // Boolean called as function
+        myBooleanCons.set(self.fdParentFrame, JsObject(frame));
+        myBooleanCons.set(self.fdValue, JsNativeFunction(|_this, args| {
+            JsBool(self.toBoolean(getarg(args, 0)))
+        }));
+
+        // support for console.log
+        let myConsole = Object::create(self.root_map, self.myObject);
+        frame.set(FieldDesc { name: intern("console"), hidden: false },
+                  JsObject(myConsole));
 
         // native functions
         do self.add_native_func_str(frame, myConsole, "log") |_this, args| {
             let sargs = do vec::map_consume(args) |val| { val.to_str() };
             io::println(str::connect(sargs, " "));
             JsUndefined
+        };
+        let opts = do self.add_native_func_str(frame, self.myObject, "toString")
+            |this, _args| {
+            let _o = self.toObject(this);
+            // XXX fetch the [[Class]] internal property of o
+            JsVal::from_str("[object]")
+        };
+        do self.add_native_func_str(frame, self.myArray, "toString")
+            |this, _args| {
+            let o = self.toObject(this);
+            let mut func = o.get(FieldDesc{name:intern("join"),hidden:false});
+            if !self.isCallable(func) {
+                func = JsObject(opts);
+            }
+            self.interpret_function(func, JsObject(o), ~[])
+        };
+        do self.add_native_func_str(frame, self.myObject, "valueOf")
+            |this, _args| {
+            let o = self.toObject(this);
+            // XXX host object support?
+            JsObject(o)
+        };
+        do self.add_native_func(frame, self.myObject, self.fdDefaultValue)
+            |this, args| {
+            let isDate = false; // XXX fix when we support date objects
+            let rawhint = match getarg(args, 0) {
+                JsString(utf16) => Some(str::from_utf16(utf16)),
+                _ => None
+            };
+            let hint = match rawhint {
+                Some(~"String") => "String",
+                Some(~"Number") => "Number",
+                _ if !isDate => "Number",
+                _ => "String"
+            };
+            let toString = self.get_slot(this, JsVal::from_str("toString"));
+            let valueOf = self.get_slot(this, JsVal::from_str("valueOf"));
+            let first, second;
+            if "String"==hint {
+                first = toString; second = valueOf;
+            } else {
+                first = valueOf; second = toString;
+            }
+            let mut rv : Option<JsVal> = None;
+            if self.isCallable(first) {
+                let rv1 = self.interpret_function(first, this, ~[]);
+                match rv1 {
+                    JsObject(_) => { /* not primitive, fall through */ },
+                    _ => { rv = Some(rv1); }
+                }
+            }
+            if rv.is_none() && self.isCallable(second) {
+                let rv2 = self.interpret_function(second, this, ~[]);
+                match rv2 {
+                    JsObject(_) => { /* not primitive, fall through */ },
+                    _ => { rv = Some(rv2); }
+                }
+            }
+            match rv {
+                None => fail!("TypeError"), // XXX throw
+                Some(rv3) => rv3
+            }
         };
         do self.add_native_func_str(frame, self.myObject, "hasOwnProperty")
             |this, args| {
@@ -210,6 +281,14 @@ impl Environment {
                 _ => fail!("TypeError") // XXX should throw
             };
             JsObject(rv)
+        };
+        do self.add_native_func_str(frame, self.myBoolean, "valueOf")
+            |_this, _args| {
+            match this {
+                JsBool(_) => this,
+                JsObject(_) => fail!("Boolean.valueOf() unimplemented"),
+                _ => fail!(fmt!("TypeError: %s", this.to_str()))
+            }
         };
         do self.add_native_func_str(frame, frame, "isNaN") |_this, args| {
             JsBool(self.toNumber(getarg(args, 0)).is_NaN())
@@ -296,15 +375,24 @@ impl Environment {
         };
         do self.add_native_func_str(frame, self.myString, "substring")
             |_this, _args| {
-            fail!("String.subtring() unimplemented");
+            fail!("String.substring() unimplemented");
+        };
+        do self.add_native_func_str(frame, self.myString, "valueOf")
+            |this, _args| {
+            match this {
+                JsString(_) => this,
+                JsObject(_) => fail!("wrapped string valueOf unimplemented"),
+                _ =>
+                fail!("TypeError: String.prototype.valueOf is not generic")
+            }
         };
         do self.add_native_func_str(frame, myStringCons, "fromCharCode")
             |_this, _args| {
             fail!("String.fromCharCode() unimplemented");
         };
         do self.add_native_func_str(frame, self.myMath, "floor")
-            |_this, _args| {
-            fail!("Math.floor() unimplemented");
+            |_this, args| {
+            JsNumber(self.toNumber(getarg(args, 0)).floor())
         };
         do self.add_native_func_str(frame, self.myNumber, "toString")
             |this, args| {
@@ -325,6 +413,13 @@ impl Environment {
                 _ => f64::to_str_radix(n, radix)
             };
             JsVal::from_str(s)
+        };
+        do self.add_native_func_str(frame, self.myNumber, "valueOf")
+            |this, _args| {
+            match this {
+                JsNumber(_) => this,
+                _ => fail!("TypeError")
+            }
         };
 
         // XXX: We're not quite handling the "this" argument correctly.
@@ -396,18 +491,52 @@ impl Environment {
         frame
     }
 
+    fn isCallable(&self, val: JsVal) -> bool {
+        match val {
+            JsObject(_) => match self.get_slot_fd(val, self.fdValue) {
+                JsNativeFunction(_) | JsFunctionCode(_) => true,
+                _ => false
+            },
+            _ => false
+        }
+    }
+
+    fn toObject(&self, val: JsVal) -> @mut Object {
+        match val {
+            JsUndefined | JsNull => fail!("TypeError"), // xxx throw
+            JsObject(obj) => obj,
+            // should create wrapper types for JsBool,JsNumber,JsString
+            _ => fail!("unimplemented")
+        }
+    }
+
+    priv fn toPrimitive(&self, val: @mut Object, hint: &str) -> JsVal {
+        let funcDefaultValue = val.get(self.fdDefaultValue);
+        self.interpret_function(funcDefaultValue, JsObject(val),
+                                ~[JsVal::from_str(hint)])
+    }
     pub fn toString(&self, val: JsVal) -> ~str {
-        // xxx invoke toString?
-        val.to_str()
+        match val {
+            JsObject(obj) => self.toString(self.toPrimitive(obj, "String")),
+            _ => val.to_str()
+        }
+    }
+    pub fn toBoolean(&self, val: JsVal) -> bool {
+        match val {
+            JsUndefined | JsNull => false,
+            JsBool(b) => b,
+            JsNumber(n) => !(n.is_NaN() || n==0f64), //+0,-0, or NaN
+            JsString(utf16) => !utf16.is_empty(),
+            //JsObject(obj) => match obj.get(self.fdType)...
+            JsObject(_) => true,
+            _ => fail!(fmt!("unimplemented case for toBoolean: %?", val))
+        }
     }
     pub fn toNumber(&self, val: JsVal) -> f64 {
         // this is the conversion done by (eg) bi_mul
         match val {
-            JsObject(obj) => { // arrays are weird, other objects = true
-                match obj.get(self.fdType).to_str() {
-                    ~"array" => fail!("unimplemented array->number conversion"),
-                    _ => f64::NaN
-                }
+            JsObject(obj) => {
+                self.toNumber(self.toPrimitive(obj, "Number"))
             },
             JsString(utf16) => {
                 let s = str::from_utf16(utf16);
@@ -418,6 +547,9 @@ impl Environment {
                     // these are the javascript names (which rust doesn't accept)
                     "Infinity" | "+Infinity" => f64::infinity,
                     "-Infinity" => f64::neg_infinity,
+                    // empty string is zero
+                    "" => 0f64,
+                    // use the rust from_str method for everything else
                     s => match f64::from_str(s) {
                         Some(n) => n,
                         None => f64::NaN
@@ -630,6 +762,10 @@ impl Environment {
                 fail!(fmt!("Not a function at %u function %u: %?", state.pc, state.function.id, _f));
             }
         };
+        self.invoke_internal(state, func, my_this, native_args)
+    }
+    priv fn invoke_internal(&self, mut state: ~State, func: @mut Object,
+                            this: JsVal, args: ~[JsVal]) -> ~State {
         // assert that func is a function
         match func.get(self.fdType) {
             JsString(utf16) if "function"==str::from_utf16(utf16) => {
@@ -643,8 +779,7 @@ impl Environment {
         match func.get(self.fdValue) {
             JsNativeFunction(f) => {
                 // "native code"
-                // build proper native arguments array
-                let rv = f(my_this, native_args);
+                let rv = f(this, args);
                 // handle "apply-like" natives
                 match (func.get(self.fdIsApply), rv) {
                     (JsBool(true), _) => {
@@ -674,10 +809,10 @@ impl Environment {
                                             parent_frame);
                 nframe.set(FieldDesc {
                     name: intern("this"), hidden: false
-                }, my_this);
+                }, this);
                 nframe.set(FieldDesc {
                     name: intern("arguments"), hidden: false
-                }, self.arrayCreate(native_args));
+                }, self.arrayCreate(args));
                 // construct new child state
                 return ~State::new(Some(state), nframe,
                                    f.module, f.function);
@@ -701,10 +836,26 @@ impl Environment {
 
     // interpret a function object stored in a JsVal
     pub fn interpret_function(&self, function: JsVal,
-                              this: JsVal, args: &[JsVal]) -> JsVal {
+                              this: JsVal, args: ~[JsVal]) -> JsVal {
         // lookup the module and function id from the function JsVal
         match (self.get_slot_fd(function, self.fdValue),
                self.get_slot_fd(function, self.fdParentFrame)) {
+            (JsNativeFunction(f), _) => {
+                let rv = f(this, args);
+                // "apply-like" natives
+                match self.get_slot_fd(function, self.fdIsApply) {
+                    JsBool(true) => {
+                        let mut nargs : ~[JsVal] = ~[];
+                        for self.arrayEach(rv) |v| {
+                            nargs.push(v);
+                        }
+                        let nfunction = nargs.shift();
+                        let nthis = nargs.shift();
+                        self.interpret_function(nfunction, nthis, nargs)
+                    },
+                    _ => rv // might be a throw exception
+                }
+            },
             (JsFunctionCode(f), JsObject(parent_frame)) => {
                 // make a frame for the function invocation
                 let nframe = Object::create(self.root_map, parent_frame);
@@ -716,7 +867,7 @@ impl Environment {
                 }, self.arrayCreate(args));
                 self.interpret(f.module, f.function.id, Some(nframe))
             },
-            _ => fail!("not an interpreted function")
+            _ => fail!("not a function")
         }
     }
 
@@ -753,7 +904,8 @@ impl Environment {
             Op_push_literal => {
                 state.stack.push(match state.module.literals[arg1] {
                     JsBool(b) =>
-                        JsObject(if b { self.myTrue } else { self.myFalse }),
+                        JsBool(b),
+                        //JsObject(if b { self.myTrue } else { self.myFalse }),
                     other => other
                 });
             },
@@ -841,23 +993,9 @@ impl Environment {
             },
             Op_jmp_unless => {
                 let cond = state.stack.pop();
-                // also has to convert to boolean; see Op_un_not
-                match cond {
-                    JsBool(b) => {
-                        if !b { state.pc = arg1; }
-                    },
-                    JsString(utf16) => {
-                        if utf16.is_empty() { state.pc = arg1; }
-                    },
-                    JsNumber(n) => {
-                        if n==0f64 { state.pc = arg1; }
-                    },
-                    JsObject(_) => { /* no op */ },
-                    JsUndefined | JsNull => {
-                        state.pc = arg1;
-                    },
-                    _ => fail!(fmt!("bad argument to jmp_unless: %?", cond))
-                };
+                if !self.toBoolean(cond) {
+                    state.pc = arg1;
+                }
             },
 
             // stack manipulation
@@ -900,14 +1038,7 @@ impl Environment {
 
             // unary operators
             Op_un_not => do self.unary(state) |arg| {
-                match arg {
-                    JsBool(b) => JsBool(!b),
-                    JsString(utf16) => JsBool(utf16.is_empty()),
-                    JsNumber(n) => JsBool(n==0f64),
-                    JsObject(_) => JsBool(false),
-                    JsUndefined | JsNull => JsBool(true),
-                    _ => fail!(fmt!("unimplemented case for not: %?", arg))
-                }
+                JsBool(!self.toBoolean(arg))
             },
             Op_un_minus => do self.unary(state) |arg| {
                 match arg {
@@ -937,11 +1068,15 @@ impl Environment {
                 let rv = match (left, right) {
                     (JsNumber(l), JsNumber(r)) => (l == r),
                     (JsString(l), JsString(r)) => (l == r),
-                    (JsNumber(_), JsString(_)) |
-                    (JsString(_), JsNumber(_)) => false,
+                    (JsBool(l), JsBool(r)) => (l == r),
+                    (JsObject(l), JsObject(r)) => ptr::ref_eq(l, r),
                     (JsNull, JsNull) | (JsUndefined, JsUndefined) => true,
-                    (JsNull, _) | (_, JsNull) => false,
-                    (JsUndefined, _) | (_, JsUndefined) => false,
+                    (JsObject(_), _) |
+                    (JsNumber(_), _) |
+                    (JsBool(_),   _) |
+                    (JsString(_), _) |
+                    (JsNull,      _) |
+                    (JsUndefined, _)  => false,
                     _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_eq: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
                 };
                 JsBool(rv)
@@ -965,18 +1100,28 @@ impl Environment {
                 JsBool(rv)
             },
             Op_bi_add => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsNumber(l + r),
-                    // XXX we really need a faster algorithm for string concat
+                let lprim = match left {
+                    JsObject(obj) => self.toPrimitive(obj, ""),
+                    _ => left
+                };
+                let rprim = match right {
+                    JsObject(obj) => self.toPrimitive(obj, ""),
+                    _ => right
+                };
+                match (lprim,rprim) {
+                    // XXX we really need a faster algorithm for
+                    // string concat
                     (JsString(l), JsString(r)) => JsString(l + r),
-                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_add: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
+                    (JsString(_),_) | (_,JsString(_)) => {
+                        // XXX even slower!
+                        JsVal::from_str(self.toString(lprim) +
+                                        self.toString(rprim))
+                    },
+                    _ => JsNumber(self.toNumber(lprim) + self.toNumber(rprim))
                 }
             },
             Op_bi_sub => do self.binary(state) |left, right| {
-                match (left, right) {
-                    (JsNumber(l), JsNumber(r)) => JsNumber(l - r),
-                    _ => fail!(fmt!("func %u pc %u: unimplemented case for bi_sub: %s %s", state.function.id, state.pc, left.to_str(), right.to_str()))
-                }
+                JsNumber(self.toNumber(left) - self.toNumber(right))
             },
             Op_bi_mul => do self.binary(state) |left, right| {
                 JsNumber(self.toNumber(left) * self.toNumber(right))
@@ -1162,6 +1307,97 @@ mod tests {
             (~"'abc'.charAt('a')", ~"a"),
             (~"'abc'.charAt(1.2)", ~"b"),
             (~"'abc'.charAt(2.9)", ~"c"),
+        ]);
+    }
+
+    #[test]
+    fn test_Math_floor() {
+        script_test(~[
+            (~"Math.floor(-1.1)", ~"-2"),
+            (~"Math.floor(-1)", ~"-1"),
+            (~"Math.floor(0)", ~"0"),
+            (~"Math.floor(3)", ~"3"),
+            (~"Math.floor(3.2)", ~"3"),
+            (~"Math.floor({})", ~"NaN"),
+            (~"Math.floor([])", ~"0"),
+            (~"Math.floor([1])", ~"1"),
+            (~"Math.floor([1,2])", ~"NaN"),
+            (~"Math.floor('abc')", ~"NaN"),
+            (~"Math.floor(' 10 ')", ~"10"),
+            (~"Math.floor()", ~"NaN"),
+        ]);
+    }
+
+    #[test]
+    fn test_Boolean() {
+        script_test(~[
+            (~"Boolean(true)", ~"true"),
+            (~"Boolean(false)", ~"false"),
+            (~"Boolean(0)", ~"false"),
+            (~"Boolean(NaN)", ~"false"),
+            (~"Boolean('abc')", ~"true"),
+            (~"Boolean('')", ~"false"),
+            (~"Boolean(123)", ~"true"),
+        ]);
+    }
+
+    #[test]
+    fn test_toNumber() {
+        script_test(~[
+            (~"11 * 1", ~"11"),
+            (~"' 11\\n' * 1", ~"11"),
+            (~"' -11\\n' * 1", ~"-11"),
+            (~"true * 1", ~"1"),
+            (~"false * 1", ~"0"),
+            (~"null * 1", ~"0"),
+            (~"undefined * 1", ~"NaN"),
+            (~"'xxx' * 1", ~"NaN"),
+            (~"'Infinity' * 1", ~"Infinity"),
+            (~"'-Infinity' * 1", ~"-Infinity"),
+            (~"'inf' * 1", ~"NaN"),
+            (~"'-inf' * 1", ~"NaN"),
+            (~"'NaN' * 1", ~"NaN"),
+            (~"1e1 * 1", ~"10"),
+            (~"'1e1' * 1", ~"10"),
+            //(~"'0x10' * 1", ~"16"),// not yet supported
+            (~"'' * 1", ~"0"),
+        ]);
+    }
+
+    #[test]
+    fn test_obj_eq() {
+        script_test(~[
+            (~"var x = {};", ~"undefined"),
+            (~"var y = { f: x };", ~"undefined"),
+            (~"var z = { f: x };", ~"undefined"),
+            (~"y===z", ~"false"),
+            (~"x===x", ~"true"),
+            (~"y.f === z.f", ~"true"),
+            (~"z.f = {};", ~"undefined"),
+            (~"y.f === z.f", ~"false"),
+        ]);
+    }
+
+    #[test]
+    fn test_String_valueOf() {
+        script_test(~[
+            (~"var x = 'abc';", ~"undefined"),
+            (~"x.valueOf()", ~"abc"),
+            (~"x.toString()", ~"abc"),
+            (~"x === x.valueOf()", ~"true"),
+            (~"x === x.toString()", ~"true"),
+            (~"x === x", ~"true"),
+            // XXX: now with a wrapped string object
+        ]);
+    }
+
+    #[test]
+    fn test_Array_join() {
+        script_test(~[
+            (~"var a = [1,2,3];", ~"undefined"),
+            (~"a.toString()", ~"1,2,3"),
+            (~"a.join(':')", ~"1:2:3"),
+            (~"a.join(4)", ~"14243"),
         ]);
     }
 }
