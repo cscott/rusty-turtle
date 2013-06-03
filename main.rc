@@ -9,6 +9,22 @@ mod startup;
 mod module;
 mod interp;
 
+fn print_jsval(env: &interp::Environment, v: object::JsVal) {
+    match v {
+        object::JsThrown(ex) => {
+            // if there's a 'message' field of the thrown object,
+            // print that.
+            let msg = match env.get_slot(*ex,
+                                         object::JsVal::from_str("message")) {
+                object::JsUndefined => *ex,
+                v => v
+            };
+            io::println(fmt!("* %s", env.toString(msg).to_str()));
+        },
+        _ => io::println(env.toString(v).to_str())
+    };
+}
+
 fn main() {
     use std::rl;
 
@@ -24,7 +40,7 @@ fn main() {
                 Some(s) => {
                     unsafe { rl::add_history(s) };
                     let rv = i.repl(s);
-                    io::println(rv.to_str());
+                    print_jsval(i.env, rv);
                 }
             }
         }
@@ -38,7 +54,10 @@ fn main() {
                 let bytes = reader.read_whole_stream();
                 let source = str::from_bytes(bytes);
                 let rv = i.interpret(source);
-                io::println(fmt!("=> %s", rv.to_str()));
+                match rv {
+                    object::JsUndefined => { /* suppress printout */ },
+                    _ => print_jsval(i.env, rv)
+                };
             }
         }
     }
