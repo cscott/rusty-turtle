@@ -550,6 +550,7 @@ impl Environment {
                     // empty string is zero
                     "" => 0f64,
                     // use the rust from_str method for everything else
+                    // XXX should support 0xNN format.
                     s => match f64::from_str(s) {
                         Some(n) => n,
                         None => f64::NaN
