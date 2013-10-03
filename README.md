@@ -78,11 +78,11 @@ current concurrency mechanisms would be a web workers-style message-passing
 interface.  Each TurtleScript "worker" would have its own Rust task and
 @-heap, and use (wrapped) Rust message pipes to communicate.
 
-But a more interesting exploration would use data sharing and fork/join
+    But a more interesting exploration would use data sharing and fork/join
 parallelism.  This could be pursued along with the experimental
 fork/join support in Rust, or it could be emulated using remote objects.
 
-Alternatively, speculative/transactional execution could be explored.
+    Alternatively, speculative/transactional execution could be explored.
 A typical web page begins with a handful of `<script>` tags, often
 loading independent libraries.  One could imagine executing all those
 scripts in parallel, pausing or aborting execution only if a sequential
